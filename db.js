@@ -1,62 +1,70 @@
-import mongoose from "mongoose";
+import { Sequelize, DataTypes } from "sequelize";
+import dotenv from "dotenv";
+dotenv.config();
 
-// Connect to MongoDB
+// Connect to MySQL
+// The MYSQL_URI will be provided via environment variables
+const sequelize = new Sequelize(process.env.MYSQL_URI || "mysql://root:@localhost:3306/edushelf", {
+    dialect: "mysql",
+    logging: false
+});
+
 export const connectDB = async () => {
     try {
-        const uri = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/edushelf";
-        await mongoose.connect(uri);
-        console.log("✅ MongoDB Connected successfully");
+        await sequelize.authenticate();
+        console.log("✅ MySQL Connected successfully");
+        
+        // Auto-create/update tables
+        await sequelize.sync({ alter: true });
+        console.log("✅ MySQL Tables Synced");
     } catch (error) {
-        console.error("❌ MongoDB Connection Error:", error);
+        console.error("❌ MySQL Connection Error:", error);
         process.exit(1);
     }
 };
 
-// User Schema
-const userSchema = new mongoose.Schema({
-    uid: { type: String, required: true, unique: true },
-    email: { type: String, required: true, unique: true },
-    passwordHash: { type: String, required: true },
-    fullName: { type: String },
-    phone: { type: String },
-    enrollment: { type: String },
-    semester: { type: String },
-    department: { type: String },
-    role: { type: String, default: "user" }
+// User Model
+export const User = sequelize.define("User", {
+    uid: { type: DataTypes.STRING, primaryKey: true, unique: true },
+    email: { type: DataTypes.STRING, allowNull: false, unique: true },
+    passwordHash: { type: DataTypes.STRING, allowNull: false },
+    fullName: { type: DataTypes.STRING },
+    phone: { type: DataTypes.STRING },
+    enrollment: { type: DataTypes.STRING },
+    semester: { type: DataTypes.STRING },
+    department: { type: DataTypes.STRING },
+    role: { type: DataTypes.STRING, defaultValue: "user" }
 });
-export const User = mongoose.model("User", userSchema);
 
-// BorrowedBook Schema
-const borrowedBookSchema = new mongoose.Schema({
-    userId: { type: String, required: true },
-    bookId: { type: String, required: true },
-    title: { type: String },
-    issuedAt: { type: Date, default: Date.now },
-    dueDate: { type: Date },
-    returned: { type: Boolean, default: false },
-    returnedAt: { type: Date },
-    renewed: { type: Boolean, default: false }
+// Book Model
+export const Book = sequelize.define("Book", {
+    isbn: { type: DataTypes.STRING, primaryKey: true, unique: true },
+    title: { type: DataTypes.STRING, allowNull: false },
+    author: { type: DataTypes.STRING },
+    department: { type: DataTypes.STRING },
+    description: { type: DataTypes.TEXT },
+    quantity: { type: DataTypes.INTEGER, defaultValue: 1 },
+    available: { type: DataTypes.INTEGER, defaultValue: 1 },
+    eBookLink: { type: DataTypes.STRING }
 });
-export const BorrowedBook = mongoose.model("BorrowedBook", borrowedBookSchema);
 
-// ActivityLog Schema
-const activityLogSchema = new mongoose.Schema({
-    userId: { type: String, required: true },
-    action: { type: String, required: true },
-    timestamp: { type: Date, default: Date.now }
+// BorrowedBook Model
+export const BorrowedBook = sequelize.define("BorrowedBook", {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    userId: { type: DataTypes.STRING, allowNull: false },
+    bookId: { type: DataTypes.STRING, allowNull: false },
+    title: { type: DataTypes.STRING },
+    issuedAt: { type: DataTypes.DATE, defaultValue: Sequelize.NOW },
+    dueDate: { type: DataTypes.DATE },
+    returned: { type: DataTypes.BOOLEAN, defaultValue: false },
+    returnedAt: { type: DataTypes.DATE },
+    renewed: { type: DataTypes.BOOLEAN, defaultValue: false }
 });
-export const ActivityLog = mongoose.model("ActivityLog", activityLogSchema);
 
-// Book Schema (Inventory)
-const bookSchema = new mongoose.Schema({
-    isbn: { type: String, required: true, unique: true },
-    title: { type: String, required: true },
-    author: { type: String },
-    department: { type: String },
-    description: { type: String },
-    quantity: { type: Number, default: 1 },
-    available: { type: Number, default: 1 },
-    eBookLink: { type: String },
-    createdAt: { type: Date, default: Date.now }
+// ActivityLog Model
+export const ActivityLog = sequelize.define("ActivityLog", {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    userId: { type: DataTypes.STRING, allowNull: false },
+    action: { type: DataTypes.STRING, allowNull: false },
+    timestamp: { type: DataTypes.DATE, defaultValue: Sequelize.NOW }
 });
-export const Book = mongoose.model("Book", bookSchema);

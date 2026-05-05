@@ -46,16 +46,15 @@ io.on("connection", (socket) => {
     try {
       const { email, password, fullName, phone, enrollment, semester, department } = data;
       
-      const existingUser = await User.findOne({ email });
+      const existingUser = await User.findOne({ where: { email } });
       if (existingUser) return callback({ error: "Email already exists" });
 
       const passwordHash = await bcrypt.hash(password, 10);
       const uid = randomBytes(16).toString("hex");
 
-      const newUser = new User({
+      const newUser = await User.create({
         uid, email, passwordHash, fullName, phone, enrollment, semester, department
       });
-      await newUser.save();
 
       // Auto login after signup
       const accessToken = signAccessToken(uid, newUser.role);
@@ -69,7 +68,7 @@ io.on("connection", (socket) => {
   socket.on("login", async (data, callback) => {
     try {
       const { email, password } = data;
-      const user = await User.findOne({ email });
+      const user = await User.findOne({ where: { email } });
       if (!user) return callback({ error: "Invalid credentials" });
 
       const ok = await bcrypt.compare(password, user.passwordHash);
@@ -87,7 +86,7 @@ io.on("connection", (socket) => {
   socket.on("fetchDashboardData", async (data, callback) => {
     try {
       const { uid } = data;
-      const books = await BorrowedBook.find({ userId: uid });
+      const books = await BorrowedBook.findAll({ where: { userId: uid } });
       callback({ success: true, books });
     } catch (err) {
       console.error(err);
@@ -98,7 +97,10 @@ io.on("connection", (socket) => {
   socket.on("fetchLogs", async (data, callback) => {
     try {
       const { uid } = data;
-      const logs = await ActivityLog.find({ userId: uid }).sort({ timestamp: -1 });
+      const logs = await ActivityLog.findAll({ 
+          where: { userId: uid }, 
+          order: [['timestamp', 'DESC']] 
+      });
       callback({ success: true, logs });
     } catch (err) {
       console.error(err);
@@ -113,7 +115,10 @@ io.on("connection", (socket) => {
       const newDueDate = new Date(currentDueDate);
       newDueDate.setDate(newDueDate.getDate() + 7);
 
-      await BorrowedBook.findByIdAndUpdate(bookId, { dueDate: newDueDate, renewed: true });
+      await BorrowedBook.update(
+          { dueDate: newDueDate, renewed: true },
+          { where: { id: bookId } }
+      );
       
       // Emit an update to everyone or just the specific room if implemented
       io.emit("bookUpdated", { bookId, newDueDate });
@@ -128,7 +133,7 @@ io.on("connection", (socket) => {
   // --- BOOK INVENTORY ENDPOINTS ---
   socket.on("fetchAllBooks", async (callback) => {
     try {
-      const books = await Book.find({});
+      const books = await Book.findAll();
       callback({ success: true, books });
     } catch (err) {
       console.error("fetchAllBooks Error:", err);
@@ -140,7 +145,7 @@ io.on("connection", (socket) => {
     try {
       const { isbn, title, author, department, description, quantity, eBookLink } = data;
       
-      const existing = await Book.findOne({ isbn });
+      const existing = await Book.findOne({ where: { isbn } });
       if (existing) {
         // Update existing book
         existing.quantity += quantity;
@@ -148,14 +153,13 @@ io.on("connection", (socket) => {
         await existing.save();
       } else {
         // Create new book
-        const newBook = new Book({
+        await Book.create({
           isbn, title, author, department, description, quantity, available: quantity, eBookLink
         });
-        await newBook.save();
       }
       
       // Broadcast update
-      const books = await Book.find({});
+      const books = await Book.findAll();
       io.emit("booksUpdated", books);
       
       callback({ success: true });
@@ -169,11 +173,13 @@ io.on("connection", (socket) => {
   socket.on("scanBook", async (data, callback) => {
     try {
       const { isbn, uid } = data;
-      const book = await Book.findOne({ isbn });
+      const book = await Book.findOne({ where: { isbn } });
       if (!book) return callback({ success: false, found: false });
 
       // Check if user already borrowed this book
-      const borrowRecord = await BorrowedBook.findOne({ userId: uid, bookId: isbn, returned: false });
+      const borrowRecord = await BorrowedBook.findOne({ 
+          where: { userId: uid, bookId: isbn, returned: false } 
+      });
       
       callback({ 
         success: true, 
@@ -191,7 +197,7 @@ io.on("connection", (socket) => {
   socket.on("transactionBook", async (data, callback) => {
     try {
       const { isbn, uid, actionType } = data;
-      const book = await Book.findOne({ isbn });
+      const book = await Book.findOne({ where: { isbn } });
       if (!book) return callback({ error: "Book not found" });
 
       if (actionType === "issue") {
@@ -203,7 +209,7 @@ io.on("connection", (socket) => {
         const dueDate = new Date();
         dueDate.setDate(dueDate.getDate() + 14);
 
-        const newBorrow = new BorrowedBook({
+        const newBorrow = await BorrowedBook.create({
           userId: uid,
           bookId: isbn,
           title: book.title,
@@ -212,10 +218,11 @@ io.on("connection", (socket) => {
           returned: false,
           issuedAt: new Date()
         });
-        await newBorrow.save();
         
       } else if (actionType === "return") {
-        const borrowRecord = await BorrowedBook.findOne({ userId: uid, bookId: isbn, returned: false });
+        const borrowRecord = await BorrowedBook.findOne({ 
+            where: { userId: uid, bookId: isbn, returned: false } 
+        });
         if (!borrowRecord) return callback({ error: "No active borrow record found" });
 
         book.available = Math.min(book.available + 1, book.quantity);
@@ -227,7 +234,7 @@ io.on("connection", (socket) => {
       }
 
       // Broadcast changes
-      const books = await Book.find({});
+      const books = await Book.findAll();
       io.emit("booksUpdated", books);
       io.emit("bookUpdated"); // Trigger dashboard refresh
 
