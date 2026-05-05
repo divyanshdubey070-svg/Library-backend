@@ -1,0 +1,157 @@
+<!-- <!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verification Center - Edushelf</title>
+    <link rel="stylesheet" href="main.css" />
+    <link rel="stylesheet" href="tailwind.css" />
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
+</head>
+
+<body class="bg-background min-h-screen">
+    <div class="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col">
+        <div class="flex min-h-0 flex-1 flex-col bg-primary">
+            <div class="flex h-16 flex-shrink-0 items-center px-4">
+                <div class="flex items-center">
+                    <div class="w-8 h-8 bg-white rounded-full flex items-center justify-center mr-3">
+                        <i class="fas fa-book-open text-primary text-lg"></i>
+                    </div>
+                    <h1 class="text-white text-lg font-semibold">AutoLib Ecosystem</h1>
+                </div>
+            </div>
+            <nav class="mt-5 flex-1 space-y-1 px-2">
+                <a href="dashboard.html"
+                    class="text-primary-100 hover:bg-primary-600 hover:text-white group flex items-center px-2 py-2 text-sm font-medium rounded-md transition-colors">
+                    <i class="fas fa-chart-line mr-3 text-white"></i>
+                    Dashboard
+                </a>
+                <a href="book.html"
+                    class="text-primary-100 hover:bg-primary-600 hover:text-white group flex items-center px-2 py-2 text-sm font-medium rounded-md transition-colors">
+                    <i class="fas fa-book mr-3 text-primary-200 group-hover:text-white"></i>
+                    Books
+                </a>
+                <a href="profile.html"
+                    class="text-primary-100 hover:bg-primary-600 hover:text-white group flex items-center px-2 py-2 text-sm font-medium rounded-md transition-colors">
+                    <i class="fas fa-user-circle mr-3  text-primary-200 group-hover:text-white"></i>
+                    Profile
+                </a>
+                <a href="verification.html"
+                    class="bg-primary-600 text-white group flex items-center px-2 py-2 text-sm font-medium rounded-md">
+                    <i class="fas fa-shield-alt mr-3 text-white"></i>
+                    Verification
+                </a>
+                <a href="index.html"
+                    class="text-primary-100 hover:bg-primary-600 hover:text-white group flex items-center px-2 py-2 text-sm font-medium rounded-md transition-colors">
+                    <i class="fas fa-sign-out-alt  mr-3 text-primary-200 group-hover:text-white"></i>
+                    Logout
+                </a>
+            </nav>
+        </div>
+    </div>
+
+    <div class="lg:hidden">
+        <div
+            class="flex items-center justify-between bg-primary px-4 py-3 border-b border-primary-600 sticky top-0 z-20">
+            <div class="flex items-center">
+                <h1 class="text-white text-lg font-semibold tracking-wide">Verification Center</h1>
+            </div>
+        </div>
+    </div>
+
+    <div class="lg:pl-64">
+        <main class="flex-1 pb-24 lg:pb-8">
+            <div class="px-4 sm:px-6 lg:px-8 py-6 sm:py-8 max-w-2xl mx-auto">
+
+                <div id="statusCard"
+                    class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-6 p-6 flex items-center">
+                    <div id="statusIcon" class="w-16 h-16 rounded-full flex items-center justify-center mr-4">
+                        <i class="fas fa-spinner fa-spin text-gray-400 text-2xl"></i>
+                    </div>
+                    <div>
+                        <h2 id="statusTitle" class="text-xl font-bold text-gray-800">Checking Status...</h2>
+                        <p id="statusDesc" class="text-sm text-gray-500 mt-1">Please wait while we load your
+                            verification status.</p>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-6">
+                    <div class="px-4 sm:px-6 py-4 border-b border-gray-200 bg-gray-50">
+                        <h2 class="text-lg font-semibold text-gray-800"><i
+                                class="fas fa-qrcode text-primary mr-2"></i>Your Digital ID</h2>
+                    </div>
+                    <div class="p-6 flex flex-col items-center justify-center">
+                        <div class="bg-white p-4 rounded-xl border-2 border-dashed border-gray-300 min-h-[220px] flex items-center justify-center mb-4"
+                            id="qrCodeContainer">
+                        </div>
+                        <p class="text-sm text-gray-500 text-center font-medium">Show this QR code to the librarian.</p>
+                    </div>
+                </div>
+
+                <div id="instructionsCard"
+                    class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hidden">
+                    <div class="px-4 sm:px-6 py-4 border-b border-gray-200 bg-gray-50">
+                        <h2 class="text-lg font-semibold text-gray-800"><i
+                                class="fas fa-info-circle text-blue-500 mr-2"></i>How to Verify</h2>
+                    </div>
+                    <div class="p-6">
+                        <ol class="relative border-l border-gray-200 ml-3 space-y-6">
+                            <li class="pl-6">
+                                <span
+                                    class="absolute flex items-center justify-center w-6 h-6 bg-blue-100 rounded-full -left-3 ring-4 ring-white text-blue-800 text-xs font-bold">1</span>
+                                <h3 class="font-semibold text-gray-900">Bring your physical ID</h3>
+                                <p class="text-sm text-gray-500 mt-1">Visit the library desk with your official
+                                    College/University ID card.</p>
+                            </li>
+                            <li class="pl-6">
+                                <span
+                                    class="absolute flex items-center justify-center w-6 h-6 bg-blue-100 rounded-full -left-3 ring-4 ring-white text-blue-800 text-xs font-bold">2</span>
+                                <h3 class="font-semibold text-gray-900">Show your Digital QR</h3>
+                                <p class="text-sm text-gray-500 mt-1">Open this page and let the librarian scan the QR
+                                    code above.</p>
+                            </li>
+                            <li class="pl-6">
+                                <span
+                                    class="absolute flex items-center justify-center w-6 h-6 bg-green-100 rounded-full -left-3 ring-4 ring-white text-green-800 text-xs font-bold">3</span>
+                                <h3 class="font-semibold text-gray-900">Start Borrowing</h3>
+                                <p class="text-sm text-gray-500 mt-1">Once activated, your borrowing privileges are
+                                    permanently unlocked!</p>
+                            </li>
+                        </ol>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <div
+        class="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 pb-safe pt-1 z-40 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
+        <div class="flex justify-around items-center h-14">
+            <a href="dashboard.html"
+                class="flex flex-col items-center justify-center w-full h-full text-gray-400 active:bg-gray-50">
+                <i class="fas fa-chart-line text-lg mb-1"></i><span class="text-[10px] font-medium">Dashboard</span>
+            </a>
+            <a href="book.html"
+                class="flex flex-col items-center justify-center w-full h-full text-gray-400 active:bg-gray-50">
+                <i class="fas fa-book text-lg mb-1"></i><span class="text-[10px] font-medium">BOOKS</span>
+            </a>
+            <a href="verification.html"
+                class="flex flex-col items-center justify-center w-full h-full text-primary active:bg-gray-50">
+                <i class="fas fa-shield-alt text-lg mb-1"></i><span
+                    class="text-[10px] font-medium uppercase">Verify</span>
+            </a>
+            <a href="profile.html"
+                class="flex flex-col items-center justify-center w-full h-full text-gray-400 active:bg-gray-50">
+                <i class="fas fa-user-circle text-lg mb-1"></i><span
+                    class="text-[10px] font-medium uppercase">Profile</span>
+            </a>
+        </div>
+    </div>
+
+    <script type="module" src="verification.js"></script>
+</body>
+
+</html> -->

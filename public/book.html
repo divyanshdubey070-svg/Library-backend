@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Book Management System - Edushelf</title>
+    <link rel="stylesheet" href="main.css" />
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+    <style>
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Hide Add Book button by default, JS will show it for admins */
+        #openAddBookBtn {
+            display: none;
+        }
+    </style>
+</head>
+
+<body class="bg-background min-h-screen">
+    <div class="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col">
+        <div class="flex min-h-0 flex-1 flex-col bg-primary">
+            <div class="flex h-16 flex-shrink-0 items-center px-4">
+                <div class="flex items-center">
+                    <div class="w-8 h-8 bg-white rounded-full flex items-center justify-center mr-3">
+                        <i class="fas fa-book-open text-primary text-lg"></i>
+                    </div>
+                    <h1 class="text-white text-lg font-semibold">AutoLib Ecosystem</h1>
+                </div>
+            </div>
+            <nav class="mt-5 flex-1 space-y-1 px-2">
+                <a href="dashboard.html"
+                    class="text-primary-100 hover:bg-primary-600 hover:text-white group flex items-center px-2 py-2 text-sm font-medium rounded-md transition-colors"
+                    id="sidebarDashboardLink">
+                    <i class="fas fa-chart-line mr-3 text-white"></i> Dashboard
+                </a>
+                <a href="book.html"
+                    class="bg-primary-600 text-white group flex items-center px-2 py-2 text-sm font-medium rounded-md">
+                    <i class="fas fa-book mr-3 text-primary-200 group-hover:text-white"></i> Books
+                </a>
+                <a href="profile.html"
+                    class="student-only text-primary-100 hover:bg-primary-600 hover:text-white group flex items-center px-2 py-2 text-sm font-medium rounded-md transition-colors">
+                    <i class="fas fa-user-circle mr-3 text-primary-200 group-hover:text-white"></i>
+                    Profile
+                </a>
+                <!-- <a href="verification.html"
+                    class="student-only text-primary-100 hover:bg-primary-600 hover:text-white group flex items-center px-2 py-2 text-sm font-medium rounded-md transition-colors">
+                    <i class="fas fa-shield-alt mr-3 text-primary-200 group-hover:text-white"></i>
+                    Verification
+                </a> -->
+                <a href="index.html"
+                    class="text-primary-100 hover:bg-primary-600 hover:text-white group flex items-center px-2 py-2 text-sm font-medium rounded-md transition-colors">
+                    <i class="fas fa-sign-out-alt mr-3 text-primary-200 group-hover:text-white"></i> Logout
+                </a>
+
+            </nav>
+        </div>
+    </div>
+
+    <div class="lg:pl-64">
+        <div class="flex flex-col">
+            <header class="bg-white shadow-sm border-b border-gray-200">
+                <div class="px-4 sm:px-6 lg:px-8">
+                    <div class="flex h-16 items-center justify-between">
+                        <div class="flex items-center">
+                            <h1 class="text-2xl font-semibold text-gray-900">Book Management System</h1>
+                        </div>
+                        <div class="flex items-center space-x-4">
+                            <button class="p-2 text-gray-400 hover:text-gray-500 transition-colors" id="openScannerBtn">
+                                <i class="fas fa-barcode text-xl"></i>
+                            </button>
+                            <button
+                                class="bg-primary hover:bg-primary-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                                id="openAddBookBtn">
+                                <i class="fas fa-plus mr-2"></i> Add Book
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <main class="flex-1 pb-8">
+                <div class="px-4 sm:px-6 lg:px-8 py-8">
+
+                    <div class="bg-white rounded-xl shadow-custom border border-gray-200 p-6 mb-8">
+                        <div
+                            class="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0 lg:space-x-6">
+                            <div class="flex-1 max-w-lg">
+                                <div class="relative">
+                                    <input type="text" id="searchInput"
+                                        class="w-full px-4 py-3 pl-11 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
+                                        placeholder="Search by title, author, or ISBN..." />
+                                    <i
+                                        class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
+                                </div>
+                            </div>
+                            <div class="flex space-x-4">
+                                <select id="branchFilter"
+                                    class="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent">
+                                    <option value>All Branch</option>
+                                    <option value="ECE">ECE</option>
+                                    <option value="ME">ME</option>
+                                    <option value="EE">EE</option>
+                                    <option value="CE">CE</option>
+                                    <option value="IT">IT</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 xl:grid-cols-3 gap-8">
+                        <div class="xl:col-span-2">
+                            <div class="bg-white rounded-xl shadow-custom border border-gray-200">
+                                <div class="flex items-center justify-between p-6 border-b border-gray-200">
+                                    <div class="flex items-center space-x-4">
+                                        <h3 class="text-lg font-semibold text-gray-900">Books Collection</h3>
+                                        <span id="totalBooksCount"
+                                            class="px-3 py-1 bg-primary-100 text-primary-700 text-sm font-medium rounded-full">Loading...</span>
+                                    </div>
+                                </div>
+
+                                <div class="p-6">
+                                    <div id="booksGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                        <div class="col-span-full text-center py-10">
+                                            <div class="loader"></div>
+                                            <p class="text-gray-500">Loading books...</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="space-y-6">
+                            <div id="bookDetailsPanel"
+                                class="bg-white rounded-xl shadow-custom border border-gray-200 p-6 sticky top-6">
+                                <h3 class="text-lg font-semibold text-gray-900 mb-4">Book Details</h3>
+                                <div id="noSelection" class="text-center py-8">
+                                    <i class="fas fa-book text-gray-300 text-4xl mb-4"></i>
+                                    <p class="text-gray-500">Select a book to view details</p>
+                                </div>
+                                <div id="selectedBook" class="hidden">
+                                    <div id="adminBookActions"
+                                        class="mt-6 flex space-x-3 hidden border-t border-gray-100 pt-4">
+                                        <button id="editBookBtn"
+                                            class="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white py-2 rounded-lg text-sm font-medium transition-colors shadow-sm">
+                                            <i class="fas fa-edit mr-2"></i> Edit Stock
+                                        </button>
+                                        <button id="deleteBookBtn"
+                                            class="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg text-sm font-medium transition-colors shadow-sm">
+                                            <i class="fas fa-trash-alt mr-2"></i> Delete
+                                        </button>
+                                    </div>
+                                    <h4 id="detailTitle" class="text-lg font-semibold text-gray-900 mb-1"></h4>
+                                    <p id="detailAuthor" class="text-gray-600 mb-4 text-sm"></p>
+                                    <div class="space-y-3 border-t pt-4 border-gray-100">
+                                        <div class="flex justify-between">
+                                            <span class="text-sm text-gray-500">ISBN:</span>
+                                            <span id="detailISBN" class="text-sm font-medium text-gray-900"></span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span class="text-sm text-gray-500">Department:</span>
+                                            <span id="detailDept" class="text-sm font-medium text-gray-900"></span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span class="text-sm text-gray-500">Total Quantity:</span>
+                                            <span id="detailTotal" class="text-sm font-medium text-gray-900"></span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span class="text-sm text-gray-500">Available:</span>
+                                            <span id="detailAvailable" class="text-sm font-bold"></span>
+                                        </div>
+                                    </div>
+                                    <div id="detailEbookContainer" class="mt-4 mb-6 hidden">
+                                        <a id="detailEbookLink" href="#" target="_blank"
+                                            class="w-full flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg text-sm font-medium transition-colors shadow-sm">
+                                            <i class="fas fa-external-link-alt mr-2"></i> Read Digital Copy
+                                        </a>
+                                    </div>
+                                    <div class="mt-6">
+                                        <h5 class="text-sm font-semibold text-gray-900 mb-2">Current Borrowers</h5>
+                                        <div id="borrowerList"
+                                            class="bg-gray-50 rounded-lg p-3 max-h-40 overflow-y-auto text-xs space-y-2">
+                                            <p class="text-gray-400 italic">Checking records...</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <div id="barcodeModal" class="fixed inset-0 z-50 hidden">
+        <div class="fixed inset-0 bg-black bg-opacity-50" id="barcodeModalOverlay"></div>
+        <div class="fixed inset-0 flex items-center justify-center p-4">
+            <div class="bg-white rounded-xl p-6 max-w-md w-full">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-semibold text-gray-900">Barcode Scanner</h3>
+                    <button id="closeBarcodeModal" class="text-gray-400 hover:text-gray-600"><i
+                            class="fas fa-times text-xl"></i></button>
+                </div>
+                <div class="bg-gray-100 h-64 rounded-lg flex items-center justify-center mb-4 relative">
+                    <div id="scannerContainer" class="w-full h-full"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="addBookModal" class="fixed inset-0 z-50 hidden">
+        <div class="fixed inset-0 bg-black bg-opacity-50" id="addBookModalOverlay"></div>
+        <div class="fixed inset-0 flex items-center justify-center p-4">
+            <div class="bg-white rounded-xl p-6 max-w-2xl w-full max-h-screen overflow-y-auto">
+                <div class="flex items-center justify-between mb-6">
+                    <h3 class="text-xl font-semibold text-gray-900">Add New Book</h3>
+                    <button id="closeAddBookModal" class="text-gray-400 hover:text-gray-600">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+                <form id="addBookForm" class="space-y-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Title</label>
+                            <input type="text" id="newBookTitle" required
+                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary"
+                                placeholder="Enter book title" />
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Author</label>
+                            <input type="text" id="newBookAuthor" required
+                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary"
+                                placeholder="Enter author name" />
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">ISBN (Barcode)</label>
+                            <div class="relative">
+                                <input type="text" id="newBookISBN" required
+                                    class="w-full px-4 py-3 pr-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary"
+                                    placeholder="Enter or scan ISBN" />
+                                <button type="button" id="scanIsbnBtn" title="Scan Barcode"
+                                    class="absolute right-2 top-1/2 transform -translate-y-1/2 p-2 text-gray-500 hover:text-primary transition-colors focus:outline-none">
+                                    <i class="fas fa-camera text-lg"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Department</label>
+                            <select id="newBookDept"
+                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary">
+                                <option value="General">General</option>
+                                <option value="ECE">ECE</option>
+                                <option value="ME">ME</option>
+                                <option value="EE">EE</option>
+                                <option value="CE">CE</option>
+                                <option value="IT">IT</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Quantity (Stock)</label>
+                        <input type="number" id="newBookQuantity" min="1" value="1" required
+                            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary" />
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                        <textarea id="newBookDesc" rows="3"
+                            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary"
+                            placeholder="Enter book description"></textarea>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">E-Book URL (Google Drive Link) <span
+                                class="text-gray-400 font-normal">- Optional</span></label>
+                        <input type="url" id="newBookEbookLink"
+                            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            placeholder="https://drive.google.com/..." />
+                    </div>
+                    <div class="flex justify-end space-x-4">
+                        <button type="button" id="cancelAddBook"
+                            class="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">Cancel</button>
+                        <button type="submit"
+                            class="px-6 py-3 bg-primary hover:bg-primary-600 text-white rounded-lg">Add Book</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="barcode_scanner.js"></script>
+
+    <script type="module">
+        const socket = io();
+
+        // Temporary: Treat everyone as admin for testing purposes
+        let isAdminGlobal = true;
+        const uid = localStorage.getItem('uid');
+        
+        // Basic auth check
+        if (!uid) {
+            window.location.href = "index.html";
+        }
+
+        if (isAdminGlobal) {
+            document.getElementById('openAddBookBtn').style.display = 'block';
+        }
+
+        // We can't strictly know if admin instantly without JWT decode, 
+        // but for UI purposes we'll use a local storage flag or check if we are admin
+        // We should really decode JWT, but for now we'll fetch from server if needed.
+        // Wait, the previous login stored 'admin' in some way or navigated to admin-dashboard.
+        // Let's assume if they have access to this page, they are a user. But admins can access too.
+        
+        // For simplicity, we can fetch all books immediately.
+        subscribeToBooks();
+
+        // --- DOM Elements ---
+        const booksGrid = document.getElementById('booksGrid');
+        const searchInput = document.getElementById('searchInput');
+        const branchFilter = document.getElementById('branchFilter');
+        const addBookModal = document.getElementById('addBookModal');
+        const addBookForm = document.getElementById('addBookForm');
+        let allBooksCache = [];
+
+        window.openAddBookModalWithISBN = (isbn) => {
+            addBookModal.classList.remove('hidden');
+            document.getElementById('newBookISBN').value = isbn;
+            const isbnInput = document.getElementById('newBookISBN');
+            isbnInput.classList.add('bg-green-50', 'border-green-500');
+            setTimeout(() => isbnInput.classList.remove('bg-green-50', 'border-green-500'), 2000);
+        };
+
+        // --- Book Sync & Render ---
+        function subscribeToBooks() {
+            // Initial fetch
+            socket.emit("fetchAllBooks", (res) => {
+                if (res.success) {
+                    allBooksCache = res.books;
+                    updateTotalCount();
+                    renderBooks(allBooksCache);
+                } else {
+                    booksGrid.innerHTML = '<div class="col-span-full text-center text-red-500 py-10">Error loading books. Please refresh.</div>';
+                }
+            });
+
+            // Listen for live updates
+            socket.on("booksUpdated", (books) => {
+                allBooksCache = books;
+                updateTotalCount();
+                renderBooks(allBooksCache);
+            });
+        }
+
+        function updateTotalCount() {
+            const total = allBooksCache.reduce((acc, book) => acc + (parseInt(book.quantity) || 0), 0);
+            const available = allBooksCache.reduce((acc, book) => acc + (parseInt(book.available) || 0), 0);
+            const borrowed = total - available;
+            document.getElementById('totalBooksCount').textContent = `${total} Books (${borrowed} Borrowed)`;
+        }
+
+        function renderBooks(books) {
+            booksGrid.innerHTML = '';
+            if (books.length === 0) {
+                booksGrid.innerHTML = '<div class="col-span-full text-center text-gray-500 py-10">No books found.</div>';
+                return;
+            }
+            books.forEach(book => {
+                const isAvailable = book.available > 0;
+                const statusColor = isAvailable ? 'bg-success-100 text-success-700' : 'bg-error-100 text-error-700';
+                const statusText = isAvailable ? 'Available' : 'Out of Stock';
+
+                const card = document.createElement('div');
+                card.className = "book-card bg-gray-50 rounded-lg p-4 hover:shadow-md transition-all cursor-pointer border-2 border-transparent hover:border-primary-200";
+                const ebookBadge = book.eBookLink
+                    ? `<a href="${book.eBookLink}" target="_blank" onclick="event.stopPropagation()" class="mt-3 block w-full text-center bg-blue-50 hover:bg-blue-100 text-blue-700 py-1.5 rounded border border-blue-200 text-xs font-semibold transition-colors"><i class="fas fa-book-reader mr-1"></i> E-Book Available</a>`
+                    : '';
+
+                card.innerHTML = `
+    <div class="w-full h-32 bg-gradient-to-br from-primary-400 to-primary-600 rounded-md mb-3 flex items-center justify-center">
+        <i class="fas fa-book-open text-white text-2xl"></i>
+    </div>
+    <h4 class="font-semibold text-gray-900 text-sm mb-1 truncate" title="${book.title}">${book.title}</h4>
+    <p class="text-xs text-gray-600 mb-2 truncate">${book.author}</p>
+    <div class="flex items-center justify-between">
+        <span class="text-xs text-gray-500">ISBN: ${book.isbn || book.id}</span>
+        <span class="px-2 py-1 ${statusColor} text-xs rounded-full">${statusText}</span>
+    </div>
+    <div class="mt-2 flex items-center justify-between text-xs text-gray-500">
+        <span>${book.department || 'General'}</span>
+        <span class="font-semibold">${book.available} / ${book.quantity} left</span>
+    </div>
+    ${ebookBadge}
+`;
+                card.addEventListener('click', () => showBookDetails(book));
+                booksGrid.appendChild(card);
+            });
+        }
+
+        function filterBooks() {
+            const term = searchInput.value.toLowerCase();
+            const branch = branchFilter.value;
+            const filtered = allBooksCache.filter(book => {
+                const matchTerm = (book.title?.toLowerCase().includes(term) ||
+                    book.author?.toLowerCase().includes(term) ||
+                    (book.isbn && book.isbn.includes(term)));
+                const matchBranch = branch === "" || (book.department === branch);
+                return matchTerm && matchBranch;
+            });
+            renderBooks(filtered);
+        }
+
+        searchInput.addEventListener('input', filterBooks);
+        branchFilter.addEventListener('change', filterBooks);
+
+        async function showBookDetails(book) {
+            document.querySelectorAll('.book-card').forEach(c => c.classList.remove('border-primary-300', 'bg-primary-50'));
+            document.getElementById('noSelection').classList.add('hidden');
+            document.getElementById('selectedBook').classList.remove('hidden');
+
+            document.getElementById('detailTitle').textContent = book.title;
+            document.getElementById('detailAuthor').textContent = book.author;
+            document.getElementById('detailISBN').textContent = book.isbn || book.id;
+            document.getElementById('detailDept').textContent = book.department || 'N/A';
+            document.getElementById('detailTotal').textContent = book.quantity;
+            const availEl = document.getElementById('detailAvailable');
+            // NEW: Handle E-Book button visibility
+            const ebookContainer = document.getElementById('detailEbookContainer');
+            const ebookLink = document.getElementById('detailEbookLink');
+
+            if (book.eBookLink && book.eBookLink.trim() !== "") {
+                ebookLink.href = book.eBookLink;
+                ebookContainer.classList.remove('hidden');
+            } else {
+                ebookContainer.classList.add('hidden');
+            }
+            availEl.textContent = book.available;
+            availEl.className = book.available > 0 ? "text-sm font-bold text-green-600" : "text-sm font-bold text-red-600";
+
+            const listEl = document.getElementById('borrowerList');
+            listEl.innerHTML = '<p class="text-gray-400 italic">Checking records...</p>';
+
+            try {
+                // For now, only show general details since Borrowers list is complex to fetch securely without admin role in socket
+                listEl.innerHTML = '<p class="text-gray-500">Live borrower details available in Admin Dashboard.</p>';
+            } catch (err) {
+                console.log("Details fetch restricted:", err);
+                listEl.innerHTML = '<p class="text-gray-500 italic">Restricted</p>';
+            }
+        }
+
+        document.getElementById('openAddBookBtn').addEventListener('click', () => addBookModal.classList.remove('hidden'));
+        document.getElementById('closeAddBookModal').addEventListener('click', () => addBookModal.classList.add('hidden'));
+        document.getElementById('cancelAddBook').addEventListener('click', () => addBookModal.classList.add('hidden'));
+
+        addBookForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = addBookForm.querySelector('button[type="submit"]');
+            btn.disabled = true;
+            btn.textContent = "Adding...";
+
+            // Get the values
+            const isbn = document.getElementById('newBookISBN').value.trim();
+            const quantity = parseInt(document.getElementById('newBookQuantity').value);
+            const eBookUrl = document.getElementById('newBookEbookLink').value.trim(); // NEW
+
+            const newBook = {
+                title: document.getElementById('newBookTitle').value,
+                author: document.getElementById('newBookAuthor').value,
+                isbn: isbn,
+                department: document.getElementById('newBookDept').value,
+                description: document.getElementById('newBookDesc').value,
+                quantity: quantity,
+                available: quantity,
+                eBookLink: eBookUrl || null, // NEW: Saves the link, or null if left blank
+                createdAt: new Date()
+            };
+
+            try {
+                socket.emit("addBook", newBook, (res) => {
+                    if (res.success) {
+                        alert("✅ Book added successfully!");
+                        addBookModal.classList.add('hidden');
+                        addBookForm.reset();
+                    } else {
+                        alert("Error adding book: " + res.error);
+                    }
+                    btn.disabled = false;
+                    btn.textContent = "Add Book";
+                });
+            } catch (error) {
+                console.error("Error adding book: ", error);
+                alert("Error adding book.");
+                btn.disabled = false;
+                btn.textContent = "Add Book";
+            }
+        });
+
+        // NOTE: subscribeToBooks() removed from global scope and moved into onAuthStateChanged
+    </script>
+</body>
+
+</html>

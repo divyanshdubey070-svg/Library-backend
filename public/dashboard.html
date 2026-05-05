@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Dashboard - Edushelf</title>
+    <link rel="stylesheet" href="main.css" />
+    <link rel="stylesheet" href="tailwind.css" />
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+
+
+</head>
+
+<body class="bg-background min-h-screen">
+    <div class="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col">
+        <div class="flex min-h-0 flex-1 flex-col bg-primary">
+            <div class="flex h-16 flex-shrink-0 items-center px-4">
+                <div class="flex items-center">
+                    <div class="w-8 h-8 bg-white rounded-full flex items-center justify-center mr-3">
+                        <i class="fas fa-book-open text-primary text-lg"></i>
+                    </div>
+                    <h1 class="text-white text-lg font-semibold">AutoLib Ecosystem</h1>
+                </div>
+            </div>
+
+            <nav class="mt-5 flex-1 space-y-1 px-2">
+                <a href="library_dashboard.html"
+                    class="bg-primary-600 text-white group flex items-center px-2 py-2 text-sm font-medium rounded-md">
+                    <i class="fas fa-chart-line mr-3 text-white"></i>
+                    Dashboard
+                </a>
+                <a href="book.html"
+                    class="text-primary-100 hover:bg-primary-600 hover:text-white group flex items-center px-2 py-2 text-sm font-medium rounded-md transition-colors">
+                    <i class="fas fa-book mr-3 text-primary-200 group-hover:text-white"></i>
+                    Books
+                </a>
+                <a href="profile.html"
+                    class="text-primary-100 hover:bg-primary-600 hover:text-white group flex items-center px-2 py-2 text-sm font-medium rounded-md transition-colors">
+                    <i class="fas fa-user-circle mr-3  text-primary-200 group-hover:text-white"></i>
+                    Profile
+                </a>
+                <!-- <a href="verification.html"
+                    class="text-primary-100 hover:bg-primary-600 hover:text-white group flex items-center px-2 py-2 text-sm font-medium rounded-md transition-colors">
+                    <i class="fas fa-shield-alt mr-3 text-primary-200 group-hover:text-white"></i>
+                    Verification
+                </a> -->
+                <a href="index.html"
+                    class="text-primary-100 hover:bg-primary-600 hover:text-white group flex items-center px-2 py-2 text-sm font-medium rounded-md transition-colors">
+                    <i class="fas fa-sign-out-alt  mr-3 text-primary-200 group-hover:text-white"></i>
+                    Logout
+                </a>
+            </nav>
+
+            <!-- <div class="flex flex-shrink-0 p-4">
+                <div class="flex items-center">
+                    <div class="ml-3">
+                        <p class="text-sm font-medium text-white" alt="USER"><span id="welcomeUserName"></span></p>
+                    </div>
+                </div>
+            </div> -->
+        </div>
+    </div>
+
+    <div class="lg:hidden">
+        <div class="flex items-center justify-between bg-primary px-4 py-3 border-b border-primary-600">
+            <div class="flex items-center">
+                <div class="w-8 h-8 bg-white rounded-full flex items-center justify-center mr-3 shadow-sm">
+                    <i class="fas fa-book-open text-primary text-lg"></i>
+                </div>
+                <h1 class="text-white text-lg font-semibold tracking-wide">Edushelf</h1>
+            </div>
+            <button id="mobileMenuBtn" class="text-white p-1 focus:outline-none">
+                <i class="fas fa-bars text-xl"></i>
+            </button>
+        </div>
+
+        <div id="mobileMenu" class="fixed inset-0 z-50 hidden">
+            <div class="fixed inset-0 bg-black bg-opacity-50 transition-opacity" id="mobileMenuOverlay"></div>
+            <div class="fixed inset-y-0 left-0 w-64 bg-primary transform -translate-x-full transition-transform duration-300 shadow-xl"
+                id="mobileMenuPanel">
+                <div class="flex items-center justify-between p-4 border-b border-primary-600">
+                    <h2 class="text-white text-lg font-semibold">Menu</h2>
+                    <button id="closeMobileMenu" class="text-white p-1">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+                <nav class="mt-5 space-y-1 px-2">
+                    <a href="library_dashboard.html"
+                        class="bg-primary-600 text-white group flex items-center px-2 py-3 text-sm font-medium rounded-md">
+                        <i class="fas fa-chart-line mr-3"></i> Dashboard
+                    </a>
+                    <a href="book.html"
+                        class="text-primary-100 hover:bg-primary-600 hover:text-white group flex items-center px-2 py-3 text-sm font-medium rounded-md transition-colors">
+                        <i class="fas fa-book mr-3"></i> BOOKS
+                    </a>
+                </nav>
+            </div>
+        </div>
+    </div>
+
+    <div class="lg:pl-64">
+        <div class="flex flex-col">
+            <header class="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-10 lg:static">
+                <div class="px-4 sm:px-6 lg:px-8">
+                    <div class="flex h-16 items-center justify-between">
+                        <div class="flex items-center overflow-hidden">
+                            <h1 class="text-xl sm:text-2xl font-semibold text-gray-900 truncate">Welcome,<span
+                                    id="welcomeUserName"></span></h1>
+                        </div>
+                            <button
+                                class="p-2 text-gray-600 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors shadow-sm focus:outline-none"
+                                id="qrScannerBtn" aria-label="Show QR Code">
+                                <i class="fas fa-qrcode text-xl"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <main class="flex-1 pb-20 lg:pb-8">
+                <div class="px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 mb-8">
+                        <div
+                            class="bg-gradient-to-br from-secondary-100 to-secondary-200 rounded-xl p-5 sm:p-6 border border-secondary-200 shadow-sm">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p
+                                        class="text-secondary-600 text-xs sm:text-sm font-medium uppercase tracking-wide">
+                                        Currently Borrowed</p>
+                                    <p class="text-2xl sm:text-3xl font-bold text-secondary-800 mt-1 sm:mt-2"
+                                        id="booksBorrowedCount">0</p>
+                                </div>
+                                <div
+                                    class="w-10 h-10 sm:w-12 sm:h-12 bg-secondary-300 rounded-lg flex items-center justify-center">
+                                    <i class="fas fa-book-reader text-secondary-700 text-lg sm:text-xl"></i>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div
+                            class="bg-gradient-to-br from-accent-100 to-accent-200 rounded-xl p-5 sm:p-6 border border-accent-200 shadow-sm">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p class="text-accent-600 text-xs sm:text-sm font-medium uppercase tracking-wide">
+                                        Due Soon (≤ 3 Days)</p>
+                                    <p class="text-2xl sm:text-3xl font-bold text-accent-800 mt-1 sm:mt-2"
+                                        id="booksDueSoonCount">0</p>
+                                </div>
+                                <div
+                                    class="w-10 h-10 sm:w-12 sm:h-12 bg-accent-300 rounded-lg flex items-center justify-center">
+                                    <i class="fas fa-clock text-accent-700 text-lg sm:text-xl"></i>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div
+                            class="bg-gradient-to-br from-red-100 to-red-200 rounded-xl p-5 sm:p-6 border border-red-200 shadow-sm">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p class="text-red-600 text-xs sm:text-sm font-medium uppercase tracking-wide">
+                                        Overdue</p>
+                                    <p id="overdueBooksCount"
+                                        class="text-2xl sm:text-3xl font-bold text-red-800 mt-1 sm:mt-2">0</p>
+                                </div>
+                                <div
+                                    class="w-10 h-10 sm:w-12 sm:h-12 bg-red-300 rounded-lg flex items-center justify-center">
+                                    <i class="fas fa-exclamation-triangle text-red-700 text-lg sm:text-xl"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-200 mb-8 overflow-hidden">
+                        <div class="px-4 sm:px-6 py-4 border-b border-gray-200 bg-gray-50 flex items-center">
+                            <i class="fas fa-book text-blue-500 mr-2"></i>
+                            <h2 class="text-base sm:text-lg font-semibold text-gray-800">My Borrowed Books</h2>
+                        </div>
+
+                        <div class="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0">
+                            <div class="inline-block min-w-full align-middle">
+                                <table class="min-w-full divide-y divide-gray-200 border-t border-gray-100">
+                                    <thead class="bg-gray-50">
+                                        <tr>
+                                            <th
+                                                class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                Book Title</th>
+                                            <th
+                                                class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                Borrowed On</th>
+                                            <th
+                                                class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                Due Date</th>
+                                            <th
+                                                class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                Status</th>
+                                            <th
+                                                class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="studentBooksTable" class="bg-white divide-y divide-gray-200">
+                                        <tr>
+                                            <td colspan="5" class="px-6 py-8 text-center text-sm text-gray-500"><i
+                                                    class="fas fa-spinner fa-spin mr-2"></i> Loading books...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                        <div class="px-4 sm:px-6 py-4 border-b border-gray-200 bg-gray-50 flex items-center">
+                            <i class="fas fa-walking text-green-500 mr-2"></i>
+                            <h2 class="text-base sm:text-lg font-semibold text-gray-800">My Library Visits</h2>
+                        </div>
+
+                        <div class="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0">
+                            <div class="inline-block min-w-full align-middle">
+                                <table class="min-w-full divide-y divide-gray-200 border-t border-gray-100">
+                                    <thead class="bg-gray-50">
+                                        <tr>
+                                            <th
+                                                class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                Date</th>
+                                            <th
+                                                class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                Time In</th>
+                                            <th
+                                                class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                Time Out</th>
+                                            <th
+                                                class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="studentLogsTable" class="bg-white divide-y divide-gray-200">
+                                        <tr>
+                                            <td colspan="4" class="px-6 py-8 text-center text-sm text-gray-500"><i
+                                                    class="fas fa-spinner fa-spin mr-2"></i> Loading logs...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <div class="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 pb-safe pt-1 z-40">
+        <div class="flex justify-around items-center h-14">
+            <a href="dashboard.html"
+                class="flex flex-col items-center justify-center w-full h-full text-primary active:bg-gray-50">
+                <i class="fas fa-chart-line text-lg mb-1"></i>
+                <span class="text-[10px] font-medium">Dashboard</span>
+            </a>
+            <a href="book.html"
+                class="flex flex-col items-center justify-center w-full h-full text-gray-400 active:bg-gray-50">
+                <i class="fas fa-book text-lg mb-1"></i>
+                <span class="text-[10px] font-medium">BOOKS</span>
+            </a>
+            <a href="index.html"
+                class="flex flex-col items-center justify-center w-full h-full text-gray-400 active:bg-gray-50">
+                <i class="fas fa-sign-out-alt text-lg mb-1"></i>
+                <span class="text-[10px] font-medium uppercase">Logout</span>
+            </a>
+        </div>
+    </div>
+
+    <div id="qrModal" class="fixed inset-0 z-50 hidden">
+        <div class="fixed inset-0 bg-black bg-opacity-60 transition-opacity" id="qrModalOverlay"></div>
+        <div class="fixed inset-0 flex items-center justify-center p-4">
+            <div class="bg-white rounded-xl p-6 max-w-sm w-full shadow-2xl transform transition-all">
+                <div class="flex items-center justify-between mb-4 pb-2 border-b border-gray-100">
+                    <h3 class="text-lg font-bold text-gray-900 tracking-tight">YOUR ID</h3>
+                    <button id="closeQrModal"
+                        class="text-gray-400 hover:text-gray-600 bg-gray-50 hover:bg-gray-100 rounded-full w-8 h-8 flex items-center justify-center transition-colors">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="bg-gray-50 p-4 rounded-xl flex items-center justify-center mb-4 border border-gray-200 shadow-inner min-h-[250px]"
+                    id="qrCodeContainer">
+                    <div id="userQrCode"></div>
+                </div>
+                <p class="text-sm text-gray-500 text-center font-medium">Scan this QR at the entrance gate</p>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="dashboard.js"></script>
+    <script>
+        // Mobile Menu Toggle Logic
+        const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+        const mobileMenu = document.getElementById('mobileMenu');
+        const mobileMenuPanel = document.getElementById('mobileMenuPanel');
+        const mobileMenuOverlay = document.getElementById('mobileMenuOverlay');
+        const closeMobileMenu = document.getElementById('closeMobileMenu');
+
+        function openMobileMenu() {
+            mobileMenu.classList.remove('hidden');
+            setTimeout(() => {
+                mobileMenuPanel.classList.remove('-translate-x-full');
+            }, 10); // Slight delay to allow display:block to apply before animating
+        }
+
+        function closeMobileMenuFunc() {
+            mobileMenuPanel.classList.add('-translate-x-full');
+            setTimeout(() => {
+                mobileMenu.classList.add('hidden');
+            }, 300); // Matches transition duration
+        }
+
+        if (mobileMenuBtn) mobileMenuBtn.addEventListener('click', openMobileMenu);
+        if (closeMobileMenu) closeMobileMenu.addEventListener('click', closeMobileMenuFunc);
+        if (mobileMenuOverlay) mobileMenuOverlay.addEventListener('click', closeMobileMenuFunc);
+    </script>
+</body>
+
+</html>
