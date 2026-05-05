@@ -2,23 +2,23 @@ import { Sequelize, DataTypes } from "sequelize";
 import dotenv from "dotenv";
 dotenv.config();
 
-// Connect to MySQL
-// The MYSQL_URI will be provided via environment variables
-const sequelize = new Sequelize(process.env.MYSQL_URI || "mysql://root:@localhost:3306/edushelf", {
-    dialect: "mysql",
+// Connect to SQLite Local Database
+const sequelize = new Sequelize({
+    dialect: "sqlite",
+    storage: "./database.sqlite", // Data will be stored ONLY in this local file on the PC
     logging: false
 });
 
 export const connectDB = async () => {
     try {
         await sequelize.authenticate();
-        console.log("✅ MySQL Connected successfully");
+        console.log("✅ Local Offline Database Connected successfully");
         
         // Auto-create/update tables
         await sequelize.sync({ alter: true });
-        console.log("✅ MySQL Tables Synced");
+        console.log("✅ Offline Tables Synced");
     } catch (error) {
-        console.error("❌ MySQL Connection Error:", error);
+        console.error("❌ Local Database Connection Error:", error);
         process.exit(1);
     }
 };
