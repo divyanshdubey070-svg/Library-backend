@@ -4,31 +4,30 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>EDUSHELF</title>
+  <title>AutoLib Admin Console</title>
   <link rel="stylesheet" href="styles.css">
-  <link rel="icon" href="data:,">
-  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+  <link class="favicon" rel="icon" href="data:,">
 </head>
 
 <body>
   <div class="container">
 
     <div class="form-container" id="login-form">
-      <h2>LOGIN</h2>
+      <h2>ADMIN LOGIN</h2>
 
       <div id="login-error" class="error-message"></div>
 
       <form id="loginForm">
-        <label for="loginEmail">Email</label>
+        <label for="loginEmail">Admin Email</label>
         <div class="form-group">
           <span class="icon">📧</span>
-          <input type="email" id="loginEmail" required>
+          <input type="email" id="loginEmail" placeholder="admin@example.com" required>
         </div>
 
         <label for="loginPassword">Password</label>
         <div class="form-group">
           <span class="icon">🔒</span>
-          <input type="password" id="loginPassword" required>
+          <input type="password" id="loginPassword" placeholder="••••••••" required>
           <span class="toggle-password" onclick="togglePasswordVisibility('loginPassword', this)">👁️</span>
         </div>
         <div class="options">
@@ -36,89 +35,16 @@
         </div>
         <button type="submit" class="btn">Login</button>
       </form>
-      <p>Don't have an account? <a href="#" id="show-signup">Sign up</a></p>
-    </div>
-
-    <div class="form-container" id="signup-form" style="display: none;">
-      <h2>Create Account</h2>
-      <div id="signup-error" class="error-message"></div>
-
-      <form id="signupForm">
-        <label for="signupName">Full Name</label>
-        <div class="form-group">
-          <input type="text" id="signupName" required>
-        </div>
-
-        <label for="signupEmail">Email</label>
-        <div class="form-group">
-          <input type="email" id="signupEmail" required>
-        </div>
-        <label for="signupPhone">Phone Number</label>
-        <div class="form-group">
-          <input type="tel" id="signupPhone" required>
-        </div>
-        <label for="signupEnrollment">Enrollment Number</label>
-        <div class="form-group">
-          <input type="text" id="signupEnrollment" required>
-        </div>
-
-        <label for="signupSemester">Semester</label>
-        <div class="form-group">
-          <select id="signupSemester" required
-            style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; outline: none;">
-            <option value="" disabled selected>Select Semester</option>
-            <option value="1">1</option>
-            <option value="2">2</option>
-            <option value="3">3</option>
-            <option value="4">4</option>
-            <option value="5">5</option>
-            <option value="6">6</option>
-            <option value="7">7</option>
-            <option value="8">8</option>
-          </select>
-        </div>
-
-        <label for="signupdepartment">Department</label>
-        <div class="form-group">
-          <select id="signupdepartment" required
-            style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; outline: none;">
-            <option value="" disabled selected>Select Branch</option>
-            <option value="ECE">Electronics and Communication Engineering</option>
-            <option value="ME">Mechanical Engineering</option>
-            <option value="EE">Electrical Engineering</option>
-            <option value="CE">Civil Engineering</option>
-            <option value="IT">Computer Engineering</option>
-          </select>
-        </div>
-
-        <label for="signupPassword">Password</label>
-        <div class="form-group">
-          <input type="password" id="signupPassword" required>
-          <span class="toggle-password" onclick="togglePasswordVisibility('signupPassword', this)">👁️</span>
-        </div>
-
-        <label for="signupConfirmPassword">Confirm Password</label>
-        <div class="form-group">
-          <input type="password" id="signupConfirmPassword" required>
-          <span class="toggle-password" onclick="togglePasswordVisibility('signupConfirmPassword', this)">👁️</span>
-        </div><br>
-        <p style="font-size: 11px; color: #666; margin-top: -10px; margin-bottom: 10px;">
-          Must be at least 8 characters with 1 uppercase, 1 number, and 1 special character.
-        </p>
-
-        <button type="submit" class="btn">Sign Up</button>
-      </form>
-      <p>Already have an account? <a href="#" id="show-login">Login</a></p>
     </div>
 
     <div class="form-container" id="resetPassword" style="display: none;">
       <form id="resetForm">
-        <h2>Reset Your Password</h2>
+        <h2>Reset Admin Password</h2>
 
         <label for="email">Email</label>
         <div class="form-group">
           <span class="icon">📧</span>
-          <input type="email" id="email" placeholder="Enter your email" required />
+          <input type="email" id="email" placeholder="Enter admin email" required />
         </div>
 
         <button type="submit" class="btn">Send Reset Email</button>
@@ -132,23 +58,31 @@
     </div>
   </div>
 
-  <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
   <script type="module" src="app.js?v=2"></script>
   <script>
-    // Fixed toggle logic to target the container divs rather than just the forms
+    // Toggle Password Visibility
+    window.togglePasswordVisibility = function (inputId, iconElement) {
+      const input = document.getElementById(inputId);
+      if (input.type === "password") {
+        input.type = "text";
+        iconElement.textContent = "🙈";
+      } else {
+        input.type = "password";
+        iconElement.textContent = "👁️";
+      }
+    };
+
     function showResetPassword(event) {
       if (event) event.preventDefault();
       document.getElementById('login-form').style.display = 'none';
-      document.getElementById('signup-form').style.display = 'none';
       document.getElementById('resetPassword').style.display = 'block';
     }
 
     function showLoginForm(event) {
       if (event) event.preventDefault();
       document.getElementById('resetPassword').style.display = 'none';
-      document.getElementById('signup-form').style.display = 'none';
       document.getElementById('login-form').style.display = 'block';
-      // Clear any previous reset messages
       const msg = document.getElementById('message');
       if (msg) msg.textContent = '';
     }

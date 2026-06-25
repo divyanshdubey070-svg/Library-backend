@@ -36,7 +36,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let isScannerRunning = false;
   let isScanningForForm = false; // Flag to track if we are scanning just to fill the form
   let currentUser = localStorage.getItem('uid');
-  let isAdmin = true; // Temporary: Treat everyone as admin for testing purposes
+  let isAdmin = localStorage.getItem('role') === 'admin';
 
   // --- Auth Check ---
   if (!currentUser) {
@@ -146,7 +146,14 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         const bookData = res.book;
-        const isReturn = res.isReturn;
+        const myBorrow = res.myBorrow; // Did THIS user borrow this book?
+        const anyBorrow = res.isReturn; // Has ANYONE borrowed this book?
+        
+        // Action type decision:
+        // - If I borrowed it → I return it
+        // - If admin and someone borrowed it → admin returns it
+        // - Otherwise → borrow
+        const isReturn = myBorrow || (isAdmin && anyBorrow);
         const actionType = isReturn ? "return" : "issue";
 
         // 4. Stock Check

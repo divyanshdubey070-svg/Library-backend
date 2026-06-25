@@ -1,67 +1,92 @@
-// admin-dashboard.js (Complete Version with All Features, Fixes & Scanner)
-import { auth, db } from './firebase-config.js';
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-auth.js";
-import {
-    doc, getDoc, collection, query, where, onSnapshot, orderBy, limit,
-    updateDoc, deleteDoc, setDoc, runTransaction, getDocs, serverTimestamp, addDoc, writeBatch
-} from "https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore.js";
+// admin-dashboard.js (Socket.io SQLite version)
+const socket = io();
 
-import { signOut } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-auth.js";
+// Ensure local session storage is checked (basic admin protection)
+const uid = localStorage.getItem('uid');
+const loginTime = localStorage.getItem('loginTimestamp');
+const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
 
-// --- UNIFIED AUTH & SECURITY CHECK ---
-onAuthStateChanged(auth, async (user) => {
-    if (!user) {
-        window.location.replace("index.html");
-        return;
-    }
+if (!uid || !loginTime || (Date.now() - parseInt(loginTime)) > TWENTY_FOUR_HOURS) {
+    alert("Admin session expired or invalid. Please log in again.");
+    localStorage.removeItem('loginTimestamp');
+    localStorage.removeItem('uid');
+    window.location.replace("index.html");
+}
 
-    // 1. Check 24-Hour Session
-    const loginTime = localStorage.getItem('loginTimestamp');
-    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
-
-    if (loginTime && (Date.now() - parseInt(loginTime)) > TWENTY_FOUR_HOURS) {
-        alert("Admin session expired for security. Please log in again.");
-        localStorage.removeItem('loginTimestamp');
-        await signOut(auth);
-        window.location.replace("index.html");
-        return;
-    }
-
-    // 2. Check Admin Role
-    try {
-        const userDoc = await getDoc(doc(db, "users", user.uid));
-
-        // This accepts the user if their database role is 'admin' OR if their email contains 'admin'
-        const isDbAdmin = userDoc.exists() && userDoc.data().role === 'admin';
-        const isEmailAdmin = user.email && user.email.includes('admin');
-
-        if (!isDbAdmin && !isEmailAdmin) {
-            console.warn("Unauthorized access attempt.");
-            alert("Unauthorized! You do not have Admin privileges.");
-            window.location.replace("dashboard.html"); // Send back to student dashboard
-            return;
-        }
-
-        // 3. If they pass all security checks, start loading the data!
-        startRealtimeListeners();
-
-    } catch (error) {
-        console.error("Role verification failed:", error);
-        window.location.replace("index.html");
-    }
-});
-// ----------------------------------------
-
-
-// ... rest of your code ...
 const $ = (id) => document.getElementById(id);
 const safeText = (id, text) => { if ($(id)) $(id).textContent = text; };
 
 /* ------------- State Management ------------- */
 let currentTab = 'today';
-let gateLogs = [], bookLogs = [], waitlistLogs = [], inventoryData = [], studentsData = [];
+let gateLogs = [], bookLogs = [], waitlistLogs = [], inventoryData = [], studentsData = [], whitelistData = [];
 let allUsersMap = {};
 let manualScanner = null; // Holds the camera instance
+
+/* ------------- Fetch All Data via Socket ------------- */
+function refreshData() {
+    socket.emit("adminFetchAllData", (res) => {
+        if (res.error) {
+            console.error("Failed to fetch admin data:", res.error);
+            return;
+        }
+
+        studentsData = res.users;
+        inventoryData = res.books;
+        bookLogs = res.borrowedBooks;
+        gateLogs = res.activityLogs;
+        whitelistData = res.whitelist;
+
+        // Build mapping of user ID to user object for easy lookup
+        allUsersMap = {};
+        studentsData.forEach(u => {
+            allUsersMap[u.uid] = u;
+        });
+
+        // Update counts
+        updateDashboardCounts();
+
+        // Render current active tab
+        if (currentTab === 'whitelist') {
+            renderWhitelistTable();
+        } else {
+            renderLogsTable();
+        }
+    });
+}
+
+// Initial fetch and listener for updates
+if (socket.connected) {
+    refreshData();
+} else {
+    socket.on("connect", refreshData);
+}
+socket.on("adminDataUpdated", refreshData);
+socket.on("booksUpdated", (books) => {
+    inventoryData = books;
+    updateDashboardCounts();
+    if (currentTab === 'inventory') renderLogsTable();
+});
+
+function updateDashboardCounts() {
+    // Total Books
+    const totalBooks = inventoryData.reduce((acc, b) => acc + (parseInt(b.quantity) || 0), 0);
+    safeText('totalBooksCount', totalBooks);
+
+    // Borrowed
+    const activeBorrows = bookLogs.filter(b => !b.returned);
+    safeText('totalBorrowedCount', activeBorrows.length);
+
+    // Overdue
+    let overdue = 0;
+    const now = Date.now();
+    activeBorrows.forEach(b => {
+        const dueMs = b.dueDate ? new Date(b.dueDate).getTime() : 0;
+        if (dueMs && dueMs < now) {
+            overdue++;
+        }
+    });
+    safeText('overdueCount', overdue);
+}
 
 /* ------------- CSV Export Logic ------------- */
 $('btnExportCSV').addEventListener('click', () => {
@@ -70,18 +95,16 @@ $('btnExportCSV').addEventListener('click', () => {
 
     // Extract Headers
     const headers = Array.from(table.querySelectorAll('th')).map(th => `"${th.innerText.replace(/"/g, '""')}"`);
-    // Remove the last "Actions" header if it exists so buttons don't export
-    if (headers[headers.length - 1].includes('ACTION')) headers.pop();
+    if (headers[headers.length - 1] && headers[headers.length - 1].includes('ACTION')) headers.pop();
     csvContent += headers.join(",") + "\n";
 
     // Extract Rows
     const rows = Array.from(table.querySelectorAll('tbody tr'));
     rows.forEach(row => {
         const cells = Array.from(row.querySelectorAll('td'));
-        if (cells.length === 1 && cells[0].innerText.includes('Loading')) return; // skip empty
+        if (cells.length === 1 && cells[0].innerText.includes('Loading')) return;
 
         const rowData = cells.map((cell, index) => {
-            // Skip the action buttons column for the CSV
             if (index === cells.length - 1 && cell.innerHTML.includes('<button')) return null;
             let text = cell.innerText.replace(/"/g, '""').replace(/\n/g, ' ');
             return `"${text}"`;
@@ -90,7 +113,6 @@ $('btnExportCSV').addEventListener('click', () => {
         csvContent += rowData.join(",") + "\n";
     });
 
-    // Download Blob
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
@@ -104,7 +126,6 @@ $('btnExportCSV').addEventListener('click', () => {
 window.notifyOverdue = (name, title, dueDate, phone) => {
     const message = `Library Notice: Hi ${name}, your borrowed book "${title}" was due on ${dueDate}. Please return it to the library to avoid any late fines. Thank you!`;
     if (phone && phone.length > 5) {
-        // Strip non-numbers
         const cleanPhone = phone.replace(/\D/g, '');
         window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`, '_blank');
     } else {
@@ -113,42 +134,46 @@ window.notifyOverdue = (name, title, dueDate, phone) => {
 };
 
 /* ------------- Student Overrides (Suspend / Force Exit) ------------- */
-window.toggleSuspend = async (uid, currentStatus) => {
+window.toggleSuspend = (uid, currentStatus) => {
     if (!confirm(`Are you sure you want to ${currentStatus ? 'UNSUSPEND' : 'SUSPEND'} this user?`)) return;
-    try {
-        await updateDoc(doc(db, 'users', uid), { suspended: !currentStatus });
-        alert("User status updated.");
-    } catch (e) { console.error(e); alert("Failed to update user."); }
+    socket.emit("adminToggleSuspend", { uid, currentStatus }, (res) => {
+        if (res.error) alert("Failed: " + res.error);
+        else alert("User status updated successfully.");
+    });
 };
 
-window.forceExit = async (uid) => {
+window.forceExit = (uid) => {
     if (!confirm("Force check-out for this student?")) return;
-    try {
-        const q = query(collection(db, 'activityLogs'), where("userId", "==", uid), where("status", "==", 1));
-        const snap = await getDocs(q);
-        if (snap.empty) { alert("Student is not currently marked as inside the library."); return; }
+    socket.emit("adminForceExit", { uid }, (res) => {
+        if (res.error) alert("Failed: " + res.error);
+        else alert("Student checked out successfully.");
+    });
+};
 
-        const logDoc = snap.docs[0];
-        await updateDoc(doc(db, 'activityLogs', logDoc.id), {
-            status: 0,
-            timeOut: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        });
-        alert("Student checked out successfully.");
-    } catch (e) { console.error(e); alert("Failed to force exit."); }
+window.adminReturnBook = (bookId, studentUid) => {
+    if (!confirm("Are you sure you want to mark this book as returned?")) return;
+    socket.emit("transactionBook", { isbn: bookId, uid: studentUid, actionType: "return" }, (res) => {
+        if (res.error) {
+            alert("Failed to return book: " + res.error);
+        } else {
+            alert("✅ Book marked as returned!");
+            refreshData();
+        }
+    });
 };
 
 /* ------------- Inventory Management (Edit/Delete) ------------- */
 window.openEditBook = (isbn) => {
-    const book = inventoryData.find(b => b.id === isbn || b.isbn === isbn);
+    const book = inventoryData.find(b => b.isbn === isbn);
     if (!book) return;
-    $('editIsbnHidden').value = book.isbn || book.id;
+    $('editIsbnHidden').value = book.isbn;
     $('editTitle').value = book.title;
     $('editQuantity').value = book.quantity;
     $('editAvailable').value = book.available;
     $('editBookModal').classList.remove('hidden');
 };
 
-$('editBookForm').addEventListener('submit', async (e) => {
+$('editBookForm').addEventListener('submit', (e) => {
     e.preventDefault();
     const isbn = $('editIsbnHidden').value;
     const nTotal = parseInt($('editQuantity').value);
@@ -159,23 +184,29 @@ $('editBookForm').addEventListener('submit', async (e) => {
         return;
     }
 
-    try {
-        await updateDoc(doc(db, 'books', isbn), { title: $('editTitle').value, quantity: nTotal, available: nAvail });
-        $('editBookModal').classList.add('hidden');
-        alert("Inventory updated!");
-    } catch (e) { alert("Update failed."); }
+    socket.emit("adminEditBook", { isbn, title: $('editTitle').value, quantity: nTotal, available: nAvail }, (res) => {
+        if (res.error) {
+            alert("Update failed: " + res.error);
+        } else {
+            $('editBookModal').classList.add('hidden');
+            alert("Inventory updated!");
+        }
+    });
 });
 
-window.deleteBook = async (isbn) => {
-    const book = inventoryData.find(b => b.id === isbn || b.isbn === isbn);
+window.deleteBook = (isbn) => {
+    const book = inventoryData.find(b => b.isbn === isbn);
+    if (!book) return;
     const borrowed = parseInt(book.quantity) - parseInt(book.available);
     if (borrowed > 0) {
         alert(`Cannot delete. ${borrowed} copies are currently checked out.`);
         return;
     }
     if (confirm(`Permanently delete "${book.title}"?`)) {
-        try { await deleteDoc(doc(db, 'books', isbn)); alert("Book deleted."); }
-        catch (e) { alert("Failed to delete."); }
+        socket.emit("adminDeleteBook", { isbn }, (res) => {
+            if (res.error) alert("Failed: " + res.error);
+            else alert("Book deleted successfully.");
+        });
     }
 };
 
@@ -186,9 +217,7 @@ function updateTableHeaders(mode) {
         thead.innerHTML = `<tr><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Title</th><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ISBN</th><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total Stock</th><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Available</th><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th></tr>`;
     } else if (mode === 'students') {
         thead.innerHTML = `<tr><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Enrollment</th><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Branch</th><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th></tr>`;
-    }
-    else if (mode === 'whitelist') {
-        // NEW: Dedicated Headers for the Approved Students tab (7 columns)
+    } else if (mode === 'whitelist') {
         thead.innerHTML = `<tr>
             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Enrollment</th>
@@ -198,13 +227,19 @@ function updateTableHeaders(mode) {
             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase w-16 text-center">Actions</th>
         </tr>`;
-    }
-    else if (mode === 'waitlists') {
+    } else if (mode === 'waitlists') {
         thead.innerHTML = `<tr><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Position</th><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Book</th><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Student</th><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reserved On</th></tr>`;
-    }
-
-    else {
-        thead.innerHTML = `<tr><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Enrollment</th><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time IN</th><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time OUT</th><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase ${mode === 'books' ? '' : 'hidden'}">Transaction / Actions</th></tr>`;
+    } else if (mode === 'borrows' || mode === 'returns') {
+        thead.innerHTML = `<tr>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Enrollment</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Student Name</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Book Title / ISBN</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">${mode === 'borrows' ? 'Borrowed At' : 'Returned At'}</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">${mode === 'borrows' ? 'Due Date' : 'Originally Issued'}</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase w-1/5">${mode === 'borrows' ? 'Action' : 'Status'}</th>
+        </tr>`;
+    } else {
+        thead.innerHTML = `<tr><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Enrollment</th><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time IN</th><th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time OUT</th></tr>`;
     }
 }
 
@@ -217,12 +252,12 @@ function renderLogsTable() {
         tbody.innerHTML = inventoryData.map(b => `
             <tr class="hover:bg-gray-50 border-b">
                 <td class="px-6 py-4 text-sm font-medium text-gray-900">${b.title}</td>
-                <td class="px-6 py-4 text-sm text-gray-500">${b.isbn || b.id}</td>
+                <td class="px-6 py-4 text-sm text-gray-500">${b.isbn}</td>
                 <td class="px-6 py-4 text-sm text-gray-500">${b.quantity}</td>
                 <td class="px-6 py-4 text-sm font-bold ${b.available > 0 ? 'text-green-600' : 'text-red-600'}">${b.available}</td>
                 <td class="px-6 py-4 text-sm space-x-2">
-                    <button onclick="window.openEditBook('${b.isbn || b.id}')" class="text-yellow-600 hover:text-yellow-800"><i class="fas fa-edit"></i></button>
-                    <button onclick="window.deleteBook('${b.isbn || b.id}')" class="text-red-600 hover:text-red-800"><i class="fas fa-trash"></i></button>
+                    <button onclick="window.openEditBook('${b.isbn}')" class="text-yellow-600 hover:text-yellow-800"><i class="fas fa-edit"></i></button>
+                    <button onclick="window.deleteBook('${b.isbn}')" class="text-red-600 hover:text-red-800"><i class="fas fa-trash"></i></button>
                 </td>
             </tr>
         `).join('') || `<tr><td colspan="5" class="px-6 py-8 text-center text-gray-500">No books found.</td></tr>`;
@@ -232,24 +267,33 @@ function renderLogsTable() {
     if (currentTab === 'students') {
         tbody.innerHTML = studentsData.map(s => `
             <tr class="hover:bg-gray-50 border-b">
-                <td class="px-6 py-4 text-sm font-medium text-gray-900">${s.fullName || s.name || 'Unknown'}</td>
-                <td class="px-6 py-4 text-sm text-gray-500">${s.enrollment || s.enrollmentNo || s.email || '-'}</td>
-                <td class="px-6 py-4 text-sm text-gray-500">${s.branch || '-'}</td>
+                <td class="px-6 py-4 text-sm font-medium text-gray-900">${s.fullName || 'Unknown'}</td>
+                <td class="px-6 py-4 text-sm text-gray-500">${s.enrollment || s.email || '-'}</td>
+                <td class="px-6 py-4 text-sm text-gray-500">${s.department || '-'}</td>
                 <td class="px-6 py-4 text-sm">${s.suspended ? '<span class="text-red-600 font-bold">Suspended</span>' : '<span class="text-green-600 font-bold">Active</span>'}</td>
                 <td class="px-6 py-4 text-sm space-x-3 flex">
-                    <button onclick="window.forceExit('${s.id}')" class="text-blue-600 hover:text-blue-800" title="Force check out of gate"><i class="fas fa-sign-out-alt"></i></button>
-                    <button onclick="window.toggleSuspend('${s.id}', ${s.suspended || false})" class="${s.suspended ? 'text-green-600' : 'text-red-600'} hover:opacity-75" title="Toggle Access"><i class="fas ${s.suspended ? 'fa-check' : 'fa-ban'}"></i></button>
+                    <button onclick="window.forceExit('${s.uid}')" class="text-blue-600 hover:text-blue-800" title="Force check out of gate"><i class="fas fa-sign-out-alt"></i></button>
+                    <button onclick="window.toggleSuspend('${s.uid}', ${s.suspended || false})" class="${s.suspended ? 'text-green-600' : 'text-red-600'} hover:opacity-75" title="Toggle Access"><i class="fas ${s.suspended ? 'fa-check' : 'fa-ban'}"></i></button>
                 </td>
             </tr>
-        `).join('');
+        `).join('') || `<tr><td colspan="5" class="px-6 py-8 text-center text-gray-500">No students found.</td></tr>`;
         return;
     }
 
     let filteredData = [];
-    if (currentTab === 'today') filteredData = gateLogs.filter(l => (l.timestamp?.toDate() || new Date()) >= today);
-    else if (currentTab === 'history') filteredData = gateLogs.filter(l => (l.timestamp?.toDate() || new Date()) < today);
-    else if (currentTab === 'waitlists') filteredData = waitlistLogs;
-    else filteredData = bookLogs;
+    if (currentTab === 'today') {
+        filteredData = gateLogs.filter(l => new Date(l.timestamp) >= today);
+    } else if (currentTab === 'history') {
+        filteredData = gateLogs.filter(l => new Date(l.timestamp) < today);
+    } else if (currentTab === 'waitlists') {
+        filteredData = waitlistLogs;
+    } else if (currentTab === 'borrows') {
+        filteredData = bookLogs.filter(b => !b.returned);
+    } else if (currentTab === 'returns') {
+        filteredData = bookLogs.filter(b => b.returned);
+    } else {
+        filteredData = bookLogs;
+    }
 
     if (filteredData.length === 0) {
         tbody.innerHTML = `<tr><td colspan="6" class="px-6 py-8 text-center text-gray-500">No records found.</td></tr>`;
@@ -259,72 +303,106 @@ function renderLogsTable() {
     if (currentTab === 'waitlists') {
         tbody.innerHTML = filteredData.map((log, i) => {
             const user = allUsersMap[log.userId] || {};
-            const displayName = user.fullName || user.name || 'Unknown';
+            const displayName = user.fullName || 'Unknown';
             return `
-            <tr class="hover:bg-gray-50 border-b"><td class="px-6 py-4 text-sm font-bold text-purple-600">#${i + 1}</td>
-            <td class="px-6 py-4 text-sm font-medium">${log.bookTitle}</td>
-            <td class="px-6 py-4 text-sm text-gray-500">${displayName}</td>
-            <td class="px-6 py-4 text-sm text-gray-500">${log.timestamp?.toDate().toLocaleString() || '-'}</td></tr>
+            <tr class="hover:bg-gray-50 border-b">
+                <td class="px-6 py-4 text-sm font-bold text-purple-600">#${i + 1}</td>
+                <td class="px-6 py-4 text-sm font-medium">${log.bookTitle}</td>
+                <td class="px-6 py-4 text-sm text-gray-500">${displayName}</td>
+                <td class="px-6 py-4 text-sm text-gray-500">${new Date(log.timestamp).toLocaleString()}</td>
+            </tr>
         `}).join('');
         return;
     }
 
-    // Gate & Books Rendering
+    if (currentTab === 'borrows') {
+        tbody.innerHTML = filteredData.map(log => {
+            const user = allUsersMap[log.userId] || {};
+            const dateObj = new Date(log.issuedAt);
+            const dueObj = log.dueDate ? new Date(log.dueDate) : null;
+            const displayEnrollment = log.enrollment || user.enrollment || '-';
+            const displayName = log.name || user.fullName || 'Unknown';
+
+            const isOverdue = dueObj && dueObj.getTime() < Date.now();
+            const badge = `<span class="px-2 py-1 text-xs font-semibold rounded-full ${isOverdue ? 'bg-red-100 text-red-800' : 'bg-orange-100 text-orange-800'}">${isOverdue ? 'OVERDUE' : 'BORROWED'}</span>`;
+
+            const returnBtn = `<button onclick="window.adminReturnBook('${log.bookId}', '${log.userId}')" class="ml-2 bg-green-50 hover:bg-green-100 text-green-600 font-semibold py-1 px-2 rounded text-xs transition-colors border border-green-200"><i class="fas fa-undo mr-1"></i>Return</button>`;
+
+            let overdueAction = '';
+            if (dueObj && isOverdue) {
+                overdueAction = `<button onclick="window.notifyOverdue('${displayName}', '${log.title}', '${dueObj.toLocaleDateString()}', '${user.phone || ''}')" class="ml-3 text-red-600 hover:text-red-800 font-bold text-xs"><i class="fas fa-bell mr-1"></i>Notify</button>`;
+            }
+
+            return `
+                <tr class="hover:bg-gray-50 border-b">
+                    <td class="px-6 py-4 text-sm font-medium text-gray-900">${displayEnrollment}</td>
+                    <td class="px-6 py-4 text-sm text-gray-500">${displayName}</td>
+                    <td class="px-6 py-4 text-sm text-gray-900 font-medium">${log.title || 'Unknown Book'}<br><span class="text-xs text-blue-600">ISBN: ${log.bookId}</span></td>
+                    <td class="px-6 py-4 text-sm text-gray-500">${dateObj.toLocaleDateString()} ${dateObj.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
+                    <td class="px-6 py-4 text-sm font-semibold ${isOverdue ? 'text-red-600' : 'text-gray-500'}">${dueObj ? dueObj.toLocaleDateString() : '-'}</td>
+                    <td class="px-6 py-4 text-sm">${badge} ${returnBtn} ${overdueAction}</td>
+                </tr>
+            `;
+        }).join('');
+        return;
+    }
+
+    if (currentTab === 'returns') {
+        tbody.innerHTML = filteredData.map(log => {
+            const user = allUsersMap[log.userId] || {};
+            const dateObj = log.returnedAt ? new Date(log.returnedAt) : (log.updatedAt ? new Date(log.updatedAt) : new Date());
+            const issuedObj = log.issuedAt ? new Date(log.issuedAt) : null;
+            const displayEnrollment = log.enrollment || user.enrollment || '-';
+            const displayName = log.name || user.fullName || 'Unknown';
+
+            const badge = `<span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">RETURNED</span>`;
+
+            return `
+                <tr class="hover:bg-gray-50 border-b">
+                    <td class="px-6 py-4 text-sm font-medium text-gray-900">${displayEnrollment}</td>
+                    <td class="px-6 py-4 text-sm text-gray-500">${displayName}</td>
+                    <td class="px-6 py-4 text-sm text-gray-900 font-medium">${log.title || 'Unknown Book'}<br><span class="text-xs text-blue-600">ISBN: ${log.bookId}</span></td>
+                    <td class="px-6 py-4 text-sm text-green-600 font-medium">${dateObj.toLocaleDateString()} ${dateObj.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
+                    <td class="px-6 py-4 text-sm text-gray-500">${issuedObj ? issuedObj.toLocaleDateString() : '-'}</td>
+                    <td class="px-6 py-4 text-sm">${badge}</td>
+                </tr>
+            `;
+        }).join('');
+        return;
+    }
+
     tbody.innerHTML = filteredData.map(log => {
         const user = allUsersMap[log.userId] || {};
-        const dateObj = (log.timestamp || log.issueDate || log.issuedAt)?.toDate() || new Date();
-        const timeIn = log.timeIn || (currentTab === 'books' && !log.returned ? dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-');
-        const timeOut = log.timeOut || (currentTab === 'books' && log.returned ? dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-');
+        const dateObj = new Date(log.timestamp || log.issuedAt);
+        const timeIn = log.timeIn || '--:--';
+        const timeOut = log.timeOut || '--:--';
 
-        // FIX: Comprehensive fallback for missing enrollment/name
-        const displayEnrollment = log.enrollment || user.enrollment || user.enrollmentNo || user.email || '-';
-        const displayName = user.fullName || user.name || log.userName || log.name || 'Unknown';
-
-        let actionCell = '';
-        if (currentTab === 'books') {
-            const isBorrow = !log.returned;
-            const badge = `<span class="px-2 text-xs font-semibold rounded-full ${isBorrow ? 'bg-orange-100 text-orange-800' : 'bg-green-100 text-green-800'}">${isBorrow ? 'BORROWED' : 'RETURNED'}</span>`;
-
-            // OVERDUE ACTION LOGIC
-            let overdueAction = '';
-            if (isBorrow) {
-                const dVal = log.dueDate || log.dueAt;
-                const dueMs = dVal?.toDate?.().getTime() || new Date(dVal).getTime();
-                if (dueMs && dueMs < Date.now()) {
-                    overdueAction = `<button onclick="window.notifyOverdue('${displayName}', '${log.bookTitle || log.title}', '${new Date(dueMs).toLocaleDateString()}', '${user.phone || ''}')" class="ml-3 text-red-600 hover:text-red-800 font-bold text-xs"><i class="fas fa-bell mr-1"></i>Notify</button>`;
-                }
-            }
-            actionCell = `<td class="px-6 py-4 text-sm">${badge} ${overdueAction}</td>`;
-        }
+        const displayEnrollment = log.enrollment || user.enrollment || '-';
+        const displayName = log.name || user.fullName || 'Unknown';
 
         return `
             <tr class="hover:bg-gray-50 border-b">
                 <td class="px-6 py-4 text-sm font-medium text-gray-900">${displayEnrollment}</td>
-                <td class="px-6 py-4 text-sm text-gray-500">${displayName}<br><span class="text-xs text-blue-600">${log.bookTitle || log.title || ''}</span></td>
+                <td class="px-6 py-4 text-sm text-gray-500">${displayName}<br><span class="text-xs text-blue-600">${log.title || ''}</span></td>
                 <td class="px-6 py-4 text-sm text-gray-500">${dateObj.toLocaleDateString()}</td>
                 <td class="px-6 py-4 text-sm text-green-600">${timeIn}</td>
                 <td class="px-6 py-4 text-sm text-red-600">${timeOut}</td>
-                ${actionCell}
             </tr>
         `;
     }).join('');
 }
 
 /* ------------- Tab Listeners ------------- */
-/* ------------- Tab Listeners ------------- */
-['tabToday', 'tabHistory', 'tabBooks', 'tabWaitlists', 'tabInventory', 'tabStudents', 'tabWhitelist'].forEach(id => {
+['tabToday', 'tabHistory', 'tabBorrows', 'tabReturns', 'tabWaitlists', 'tabInventory', 'tabStudents', 'tabWhitelist'].forEach(id => {
     $(id).addEventListener('click', () => {
-        // Reset all tabs to gray
-        ['tabToday', 'tabHistory', 'tabBooks', 'tabWaitlists', 'tabInventory', 'tabStudents', 'tabWhitelist'].forEach(t => {
+        ['tabToday', 'tabHistory', 'tabBorrows', 'tabReturns', 'tabWaitlists', 'tabInventory', 'tabStudents', 'tabWhitelist'].forEach(t => {
             $(t).classList.remove('text-blue-600', 'border-b-2', 'border-blue-600');
             $(t).classList.add('text-gray-500');
         });
 
-        // Highlight clicked tab
         $(id).classList.add('text-blue-600', 'border-b-2', 'border-blue-600');
         currentTab = id.replace('tab', '').toLowerCase();
 
-        // --- NEW: Toggle the Search/Upload Controls ---
         if (currentTab === 'whitelist') {
             $('whitelistControls').classList.remove('hidden');
             renderWhitelistTable();
@@ -335,7 +413,7 @@ function renderLogsTable() {
     });
 });
 
-/* ------------- Manual Issue/Return Form Logic (WITH SCANNER) ------------- */
+/* ------------- Manual Issue/Return Form Logic ------------- */
 $('btnManualTrans').addEventListener('click', () => $('manualTransModal').classList.remove('hidden'));
 
 // Scanner Setup
@@ -348,10 +426,10 @@ $('startManualScanBtn').addEventListener('click', () => {
         { facingMode: "environment" },
         { fps: 10, qrbox: { width: 250, height: 150 } },
         (decodedText) => {
-            $('manualISBN').value = decodedText; // Auto-fill
-            stopManualScanner(); // Stop camera
+            $('manualISBN').value = decodedText;
+            stopManualScanner();
         },
-        (err) => { /* Ignore minor errors */ }
+        (err) => {}
     ).catch(err => {
         alert("Camera error: Ensure you have granted permission.");
         $('manualScannerBox').classList.add('hidden');
@@ -370,7 +448,6 @@ function stopManualScanner() {
 
 $('stopManualScanBtn').addEventListener('click', stopManualScanner);
 
-// Close Handlers (Ensures camera turns off if they click X)
 const closeManual = () => {
     $('manualTransModal').classList.add('hidden');
     stopManualScanner();
@@ -380,92 +457,29 @@ $('manualTransOverlay').onclick = closeManual;
 $('closeEditBook').onclick = () => $('editBookModal').classList.add('hidden');
 $('editBookOverlay').onclick = () => $('editBookModal').classList.add('hidden');
 
-
 // Submit Transaction
-$('manualTransForm').addEventListener('submit', async (e) => {
+$('manualTransForm').addEventListener('submit', (e) => {
     e.preventDefault();
     const identifier = $('manualEnrollment').value.trim();
     const isbn = $('manualISBN').value.trim();
     const action = $('manualAction').value;
 
-    // Search for user by enrollment OR email
-    const user = studentsData.find(u => u.enrollment === identifier || u.enrollmentNo === identifier || u.email === identifier);
-    if (!user) { alert("Student not found. Please check enrollment number."); return; }
+    const user = studentsData.find(u => u.enrollment === identifier || u.email === identifier);
+    if (!user) { alert("Student not found. Please check enrollment number/email."); return; }
 
-    const book = inventoryData.find(b => b.id === isbn || b.isbn === isbn);
-    if (!book) { alert("Book not found. Please check ISBN."); return; }
-
-    try {
-        const bookRef = doc(db, 'books', book.id);
-        const borrowRef = doc(db, 'borrowedBooks', `${user.id}_${book.id}`);
-
-        await runTransaction(db, async (transaction) => {
-            const freshBook = await transaction.get(bookRef);
-            const avail = parseInt(freshBook.data().available);
-
-            if (action === 'issue') {
-                if (avail <= 0) throw "Book out of stock!";
-                transaction.update(bookRef, { available: avail - 1 });
-                const dueDate = new Date(); dueDate.setDate(dueDate.getDate() + 14);
-                transaction.set(borrowRef, {
-                    userId: user.id, bookId: book.id, title: book.title, author: book.author,
-                    issuedAt: new Date(), dueDate: dueDate, returned: false
-                });
-            } else {
-                transaction.update(bookRef, { available: avail + 1 });
-                transaction.update(borrowRef, { returned: true, returnedAt: new Date() });
-            }
-        });
-        alert(`Successfully manually ${action}ed!`);
-        $('manualTransModal').classList.add('hidden');
-        $('manualTransForm').reset();
-    } catch (err) {
-        alert("Transaction failed: " + err);
-    }
+    socket.emit("transactionBook", { isbn, uid: user.uid, actionType: action }, (res) => {
+        if (res.error) {
+            alert("Transaction failed: " + res.error);
+        } else {
+            alert(`Successfully manually ${action}ed!`);
+            $('manualTransModal').classList.add('hidden');
+            $('manualTransForm').reset();
+            refreshData();
+        }
+    });
 });
 
-/* ------------- Real-time DB Sync ------------- */
-function startRealtimeListeners() {
-    onSnapshot(collection(db, 'users'), (snap) => {
-        allUsersMap = {}; studentsData = [];
-        snap.forEach(s => { const d = { id: s.id, ...s.data() }; allUsersMap[s.id] = d; studentsData.push(d); });
-        renderLogsTable();
-    });
-
-    onSnapshot(collection(db, 'books'), (snap) => {
-        inventoryData = [];
-        snap.forEach(s => inventoryData.push({ id: s.id, ...s.data() }));
-        safeText('totalBooksCount', String(snap.size));
-        if (currentTab === 'inventory') renderLogsTable();
-    });
-
-    onSnapshot(collection(db, 'borrowedBooks'), (snap) => {
-        let borrowed = [], total = 0, overdue = 0, now = Date.now();
-        snap.forEach(s => {
-            const d = s.data();
-            if (!d.returned) {
-                total++;
-                const dueMs = d.dueDate?.toDate?.().getTime() || new Date(d.dueDate).getTime();
-                if (dueMs < now) overdue++;
-            }
-            borrowed.push({ id: s.id, ...d, source: 'borrowedBooks' });
-        });
-        safeText('totalBorrowedCount', total); safeText('overdueCount', overdue);
-        bookLogs = borrowed; // Simplified for brevity
-        if (currentTab === 'books') renderLogsTable();
-    });
-
-    onSnapshot(query(collection(db, 'activityLogs'), orderBy('timestamp', 'desc'), limit(100)), (snap) => {
-        gateLogs = []; snap.forEach(s => gateLogs.push({ id: s.id, ...s.data() }));
-        if (['today', 'history'].includes(currentTab)) renderLogsTable();
-    });
-
-    onSnapshot(query(collection(db, 'reservations'), where("status", "==", "waiting"), orderBy('timestamp', 'asc')), (snap) => {
-        waitlistLogs = []; snap.forEach(s => waitlistLogs.push({ id: s.id, ...s.data() }));
-        if (currentTab === 'waitlists') renderLogsTable();
-    });
-}
-
+/* ------------- Gate Scanner (Check-in/out) ------------- */
 const scannerModal = $('scannerModal');
 const openScannerBtn = $('openScannerBtn');
 const closeScannerModal = $('closeScannerModal');
@@ -484,10 +498,11 @@ function showMessage(text, type) {
     else if (type === 'error') messageBox.classList.add('bg-red-100', 'text-red-800');
     else if (type === 'warning') messageBox.classList.add('bg-yellow-100', 'text-yellow-800');
 
+    messageBox.classList.remove('hidden');
     setTimeout(() => messageBox.classList.add('hidden'), 4000);
 }
 
-async function handleScan(decodedText) {
+function handleScan(decodedText) {
     if (decodedText === lastScannedString) return;
     lastScannedString = decodedText;
     setTimeout(() => lastScannedString = "", 4000);
@@ -500,90 +515,35 @@ async function handleScan(decodedText) {
         return;
     }
 
-    // Rely on Enrollment since it is guaranteed in the QR
-    const enrollment = userData.enrollment || userData.enrollmentNo || "N/A";
-    const name = userData.fullName || userData.fullname || "Unknown User";
-    const branch = userData.department || userData.branch || "-";
-    const sem = userData.semester || userData.sem || "-";
+    const enrollment = userData.enrollment || "N/A";
+    const name = userData.fullName || "Unknown User";
+    const branch = userData.department || "-";
+    const sem = userData.semester || "-";
 
-    try {
-        // --- 1. BULLETPROOF VERIFICATION CHECK ---
-        // Find the user document by Enrollment Number
-        const usersRef = collection(db, "users");
-        const qUser = query(usersRef, where("enrollment", "==", enrollment));
-        const userQuerySnap = await getDocs(qUser);
-
-        let correctUserId = "Unknown";
-
-        if (!userQuerySnap.empty) {
-            const userDoc = userQuerySnap.docs[0];
-            const uData = userDoc.data();
-            correctUserId = userDoc.id; // Grab the correct UID for gate logs
-
-            // Check if they specifically need verification
-            if (uData.isVerified === false) {
-                // Pause the scanner to ask the admin
-                const confirmActivation = confirm(`Verification Required: \nName: ${name}\nEnrollment: ${enrollment}\n\nHave you checked their physical ID card? Click OK to activate them permanently.`);
-
-                if (confirmActivation) {
-                    await updateDoc(doc(db, "users", correctUserId), { isVerified: true });
-                    showMessage(`✅ Activated successfully: ${name}`, "success");
-                } else {
-                    showMessage(`Activation cancelled for ${name}.`, "warning");
-                }
-
-                closeScanner();
-                return; // Stop here. Do not log them into the gate yet.
+    // Send scan log to SQLite backend via Socket
+    socket.emit("adminScanGateQR", { enrollment, name, branch, sem, isVerifiedChecked: false }, (res) => {
+        if (res.error) {
+            showMessage(res.error, "error");
+        } else if (res.needsVerification) {
+            // Confirm verification physically
+            const confirmActivation = confirm(`Verification Required: \nName: ${res.user.fullName}\nEnrollment: ${res.user.enrollment}\n\nHave you checked their physical ID card? Click OK to activate them permanently.`);
+            if (confirmActivation) {
+                // Emit again with verification confirmation
+                socket.emit("adminScanGateQR", { enrollment, name, branch, sem, isVerifiedChecked: true }, (verifyRes) => {
+                    if (verifyRes.error) {
+                        showMessage(verifyRes.error, "error");
+                    } else {
+                        showMessage(`✅ Activated & Logged: ${name}`, "success");
+                    }
+                });
+            } else {
+                showMessage(`Activation cancelled for ${name}.`, "warning");
             }
-        }
-        // -----------------------------------------
-
-        // --- 2. GATE CHECK-IN/OUT LOGIC ---
-        const q = query(collection(db, "activityLogs"), where("enrollment", "==", enrollment), where("status", "==", 1));
-        const querySnapshot = await getDocs(q);
-
-        const now = new Date();
-        const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-        if (querySnapshot.empty) {
-            // CHECK IN
-            await addDoc(collection(db, "activityLogs"), {
-                userId: correctUserId, // Uses the guaranteed verified ID
-                enrollment: enrollment,
-                name: name,
-                branch: branch,
-                sem: sem,
-                status: 1,
-                timestamp: serverTimestamp(),
-                timeIn: timeStr,
-                timeOut: null
-            });
-            showMessage(`✅ Checked IN: ${name}`, "success");
         } else {
-            // CHECK OUT
-            const activeDoc = querySnapshot.docs[0];
-            const logData = activeDoc.data();
-
-            const checkInTime = logData.timestamp ? logData.timestamp.toDate() : now;
-            const timeDiffMs = now - checkInTime;
-
-            const COOLDOWN_MS = 1 * 60 * 1000;
-            if (timeDiffMs < COOLDOWN_MS) {
-                const remainingMinutes = Math.ceil((COOLDOWN_MS - timeDiffMs) / 60000);
-                showMessage(`⏳ Wait ${remainingMinutes} min(s) before checking out.`, "warning");
-                return;
-            }
-
-            await updateDoc(doc(db, "activityLogs", activeDoc.id), {
-                status: 0,
-                timeOut: timeStr
-            });
-            showMessage(`👋 Checked OUT: ${name}`, "success");
+            const actionText = res.action === "in" ? "Checked IN" : "Checked OUT";
+            showMessage(`✅ ${actionText}: ${res.name}`, "success");
         }
-    } catch (error) {
-        console.error("Scanner DB Error:", error);
-        showMessage("Database error.", "error");
-    }
+    });
 }
 
 function openScanner() {
@@ -601,7 +561,7 @@ function openScanner() {
             }
         };
         html5QrcodeScanner = new window.Html5QrcodeScanner("reader", scannerConfig, false);
-        html5QrcodeScanner.render(handleScan, () => { }); // Empty function ignores background errors
+        html5QrcodeScanner.render(handleScan, () => {});
     }
 }
 
@@ -619,24 +579,9 @@ if (closeScannerModal) closeScannerModal.addEventListener('click', closeScanner)
 if (scannerModalOverlay) scannerModalOverlay.addEventListener('click', closeScanner);
 
 
-
-
-// Automatic Whitelist Management Logic
-let whitelistData = []; // Store the raw data for searching
+/* ------------- Whitelist Management ------------- */
 const whitelistSearchInput = document.getElementById('whitelistSearch');
 
-// Update your tab click listener array to include 'tabWhitelist'
-// Inside the tab click logic, toggle the controls:
-// Add this inside your startRealtimeListeners() function
-onSnapshot(collection(db, 'approved_students'), (snap) => {
-    whitelistData = [];
-    snap.forEach(s => {
-        whitelistData.push({ id: s.id, ...s.data() });
-    });
-    if (currentTab === 'whitelist') renderWhitelistTable();
-});
-
-// Search functionality
 if (whitelistSearchInput) {
     whitelistSearchInput.addEventListener('input', () => {
         if (currentTab === 'whitelist') renderWhitelistTable();
@@ -645,49 +590,35 @@ if (whitelistSearchInput) {
 
 function renderWhitelistTable() {
     const tbody = $('logsTableBody');
-
-    // --- NEW: FORCE THE HEADERS TO UPDATE ---
     updateTableHeaders('whitelist');
-    // ----------------------------------------
 
     const searchTerm = whitelistSearchInput ? whitelistSearchInput.value.toLowerCase() : '';
 
-    // Filter data based on search
     const filtered = whitelistData.filter(student =>
-        student.id.toLowerCase().includes(searchTerm) ||
+        student.enrollment.toLowerCase().includes(searchTerm) ||
         (student.name && student.name.toLowerCase().includes(searchTerm))
     );
 
     if (filtered.length === 0) {
-        // Changed colspan to 7 to match your new headers
-        tbody.innerHTML = `<tr><td colspan="7" class="px-6 py-8 text-center text-gray-500">No students found.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="px-6 py-8 text-center text-gray-500">No whitelisted students found.</td></tr>`;
         return;
     }
 
     tbody.innerHTML = filtered.map(s => {
-        // Format the Verification Date or show Pending
-        let statusBadge = '';
-        if (s.isClaimed) {
-            let dateStr = "Verified";
-            if (s.verifiedAt && s.verifiedAt.toDate) {
-                dateStr = s.verifiedAt.toDate().toLocaleDateString();
-            }
-            statusBadge = `<span class="px-2 py-1 bg-green-100 text-green-800 text-xs font-bold rounded border border-green-200">Verified: ${dateStr}</span>`;
-        } else {
-            statusBadge = `<span class="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs font-bold rounded border border-yellow-200">Pending Signup</span>`;
-        }
+        const statusBadge = s.isClaimed
+            ? `<span class="px-2 py-1 bg-green-100 text-green-800 text-xs font-bold rounded border border-green-200">Claimed & Registered</span>`
+            : `<span class="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs font-bold rounded border border-yellow-200">Pending Signup</span>`;
 
-        // Return exactly 7 columns to match the 7 headers
         return `
         <tr class="hover:bg-gray-50 border-b">
             <td class="px-6 py-4 text-sm font-medium text-gray-800">${s.name || 'N/A'}</td>
-            <td class="px-6 py-4 text-sm font-mono text-gray-900 font-bold">${s.id}</td>
+            <td class="px-6 py-4 text-sm font-mono text-gray-900 font-bold">${s.enrollment}</td>
             <td class="px-6 py-4 text-sm text-gray-500">${s.department || '-'}</td>
             <td class="px-6 py-4 text-sm text-gray-500">${s.email || '-'}</td>
             <td class="px-6 py-4 text-sm text-gray-500">${s.phone || '-'}</td>
             <td class="px-6 py-4 text-sm">${statusBadge}</td>
             <td class="px-6 py-4 text-sm text-center">
-                 <button onclick="window.deleteWhitelistStudent('${s.id}')" class="text-red-600 hover:text-red-800 p-2 rounded hover:bg-red-50 transition-colors" title="Delete from Whitelist">
+                 <button onclick="window.deleteWhitelistStudent('${s.enrollment}')" class="text-red-600 hover:text-red-800 p-2 rounded hover:bg-red-50 transition-colors" title="Delete from Whitelist">
                      <i class="fas fa-trash"></i>
                  </button>
             </td>
@@ -695,81 +626,61 @@ function renderWhitelistTable() {
     `}).join('');
 }
 
-// Function to delete a student from the whitelist
-window.deleteWhitelistStudent = async (enrollment) => {
+window.deleteWhitelistStudent = (enrollment) => {
     if (!confirm(`Are you sure you want to permanently delete enrollment ${enrollment} from the approved list?`)) return;
 
-    try {
-        await deleteDoc(doc(db, 'approved_students', enrollment));
-        alert("Student successfully removed from the whitelist.");
-    } catch (error) {
-        console.error("Error deleting student:", error);
-        alert("Failed to delete student.");
-    }
+    socket.emit("adminDeleteWhitelist", { enrollment }, (res) => {
+        if (res.error) alert("Failed: " + res.error);
+        else alert("Student successfully removed from the whitelist.");
+    });
 };
 
-document.getElementById('csvFileInput').addEventListener('change', async (e) => {
+document.getElementById('csvFileInput').addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     if (!confirm("Are you sure you want to bulk upload these students?")) return;
 
     const reader = new FileReader();
-    reader.onload = async (event) => {
+    reader.onload = (event) => {
         const text = event.target.result;
         const rows = text.split('\n');
+        const students = [];
 
-        let successCount = 0;
-        let batch = writeBatch(db);
-        let operationCounter = 0;
-
-        // Skip the header row (i=1)
         for (let i = 1; i < rows.length; i++) {
             const cols = rows[i].split(',');
-            if (cols.length >= 5) { // Updated to expect at least 5 columns
+            if (cols.length >= 5) {
                 const enrollment = cols[0].trim();
                 const name = cols[1].trim();
-                const email = cols[2].trim().toLowerCase(); // Normalize to lowercase for safe matching
+                const email = cols[2].trim().toLowerCase();
                 const phone = cols[3].trim();
                 const department = cols[4].trim();
 
-                if (enrollment) {
-                    const docRef = doc(db, 'approved_students', enrollment);
-                    batch.set(docRef, {
-                        name: name,
-                        email: email,
-                        phone: phone,
-                        department: department,
-                        isClaimed: false
-                    }, { merge: true });
-
-                    successCount++;
-                    operationCounter++;
-
-                    if (operationCounter >= 400) {
-                        await batch.commit();
-                        batch = writeBatch(db);
-                        operationCounter = 0;
-                    }
+                if (enrollment && name && email) {
+                    students.push({ enrollment, name, email, phone, department });
                 }
             }
         }
 
-        // Commit any remaining operations
-        if (operationCounter > 0) {
-            await batch.commit();
+        if (students.length === 0) {
+            alert("No valid student rows found in the CSV.");
+            e.target.value = '';
+            return;
         }
 
-        alert(`Successfully uploaded ${successCount} students to the whitelist!`);
-        e.target.value = ''; // Reset the file input
+        socket.emit("adminBulkUploadWhitelist", { students }, (res) => {
+            if (res.error) {
+                alert("Upload failed: " + res.error);
+            } else {
+                alert(`Successfully uploaded ${res.count} students to the whitelist!`);
+            }
+            e.target.value = '';
+        });
     };
     reader.readAsText(file);
 });
 
-
-
-
-window.openManualAddModal = async () => {
+window.openManualAddModal = () => {
     const enrollment = prompt("Enter 12-digit Enrollment Number:");
     if (!enrollment) return;
 
@@ -782,20 +693,17 @@ window.openManualAddModal = async () => {
     const phone = prompt("Enter Phone Number:");
     if (!phone) return;
 
-    const department = prompt("Enter Department (e.g., Computer Science):");
+    const department = prompt("Enter Department (e.g., CSE, ECE):");
     if (!department) return;
 
-    try {
-        await setDoc(doc(db, 'approved_students', enrollment.trim()), {
-            name: name.trim(),
-            email: email.trim().toLowerCase(),
-            phone: phone.trim(),
-            department: department.trim(),
-            isClaimed: false
-        });
-        alert(`${name} added to the whitelist successfully!`);
-    } catch (error) {
-        console.error("Error adding student:", error);
-        alert("Failed to add student.");
-    }
+    socket.emit("adminAddWhitelist", {
+        enrollment: enrollment.trim(),
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        phone: phone.trim(),
+        department: department.trim()
+    }, (res) => {
+        if (res.error) alert("Failed: " + res.error);
+        else alert(`${name} added to the whitelist successfully!`);
+    });
 };

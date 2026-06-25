@@ -33,7 +33,9 @@ export const User = sequelize.define("User", {
     enrollment: { type: DataTypes.STRING },
     semester: { type: DataTypes.STRING },
     department: { type: DataTypes.STRING },
-    role: { type: DataTypes.STRING, defaultValue: "user" }
+    role: { type: DataTypes.STRING, defaultValue: "user" },
+    suspended: { type: DataTypes.BOOLEAN, defaultValue: false },
+    isVerified: { type: DataTypes.BOOLEAN, defaultValue: false }
 });
 
 // Book Model
@@ -65,6 +67,34 @@ export const BorrowedBook = sequelize.define("BorrowedBook", {
 export const ActivityLog = sequelize.define("ActivityLog", {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     userId: { type: DataTypes.STRING, allowNull: false },
-    action: { type: DataTypes.STRING, allowNull: false },
-    timestamp: { type: DataTypes.DATE, defaultValue: Sequelize.NOW }
+    action: { type: DataTypes.STRING },
+    timestamp: { type: DataTypes.DATE, defaultValue: Sequelize.NOW },
+    status: { type: DataTypes.INTEGER, defaultValue: 1 }, // 1 = inside, 0 = checked out
+    timeIn: { type: DataTypes.STRING },
+    timeOut: { type: DataTypes.STRING },
+    enrollment: { type: DataTypes.STRING },
+    name: { type: DataTypes.STRING },
+    branch: { type: DataTypes.STRING },
+    sem: { type: DataTypes.STRING }
 });
+
+// ReturnedBook Model
+export const ReturnedBook = sequelize.define("ReturnedBook", {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    userId: { type: DataTypes.STRING, allowNull: false },
+    bookId: { type: DataTypes.STRING, allowNull: false },
+    title: { type: DataTypes.STRING },
+    issuedAt: { type: DataTypes.DATE },
+    returnedAt: { type: DataTypes.DATE, defaultValue: Sequelize.NOW }
+});
+
+// Whitelist Model
+export const Whitelist = sequelize.define("Whitelist", {
+    enrollment: { type: DataTypes.STRING, primaryKey: true, unique: true },
+    name: { type: DataTypes.STRING, allowNull: false },
+    email: { type: DataTypes.STRING, allowNull: false },
+    phone: { type: DataTypes.STRING },
+    department: { type: DataTypes.STRING },
+    isClaimed: { type: DataTypes.BOOLEAN, defaultValue: false }
+});
+

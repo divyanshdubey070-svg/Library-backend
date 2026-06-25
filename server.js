@@ -5,16 +5,37 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
-import { createClient } from "redis";
+
 import { randomBytes } from "crypto";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import path from "path";
 import { fileURLToPath } from "url";
-import { connectDB, User, BorrowedBook, ActivityLog, Book } from "./db.js";
+import { connectDB, User, BorrowedBook, ActivityLog, Book, ReturnedBook, Whitelist } from "./db.js";
+import { Op } from "sequelize";
 
 // Initialize Database
 await connectDB();
+
+// Ensure default Admin user exists in SQLite
+try {
+  const adminEmail = "admin@example.com";
+  const adminUser = await User.findOne({ where: { email: adminEmail } });
+  if (!adminUser) {
+    const hash = await bcrypt.hash("admin123", 10);
+    await User.create({
+      uid: "uid-admin",
+      email: adminEmail,
+      passwordHash: hash,
+      fullName: "System Admin",
+      role: "admin",
+      isVerified: true
+    });
+    console.log("✅ Default admin user created in database");
+  }
+} catch (err) {
+  console.error("❌ Admin seeding error:", err);
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,7 +48,7 @@ app.use(express.static(path.join(__dirname, "public")));
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: "*", // Change this to your frontend URL in production
+    origin: "*", 
     methods: ["GET", "POST"]
   }
 });
@@ -37,26 +58,38 @@ io.on("connection", (socket) => {
   console.log("A user connected via WebSocket:", socket.id);
 
   socket.on("message", (msg) => {
-    console.log("Message from client:", msg);
-    // Broadcast to all clients
-    io.emit("message", msg); 
+    io.emit("message", msg);
   });
 
   socket.on("signup", async (data, callback) => {
     try {
       const { email, password, fullName, phone, enrollment, semester, department } = data;
-      
       const existingUser = await User.findOne({ where: { email } });
       if (existingUser) return callback({ error: "Email already exists" });
+
+      // Whitelist Verification
+      const whitelistStudent = await Whitelist.findOne({ where: { enrollment } });
+      if (!whitelistStudent) {
+        return callback({ error: "Verification Failed: Your Enrollment Number is not in the approved college database." });
+      }
+
+      if (whitelistStudent.email.toLowerCase() !== email.toLowerCase()) {
+        return callback({ error: `Security Alert: The email address provided does not match the official records for Enrollment ${enrollment}. Please use your registered college email.` });
+      }
+
+      if (whitelistStudent.isClaimed) {
+        return callback({ error: "Security Alert: An account has already been registered with this Enrollment Number." });
+      }
 
       const passwordHash = await bcrypt.hash(password, 10);
       const uid = randomBytes(16).toString("hex");
 
       const newUser = await User.create({
-        uid, email, passwordHash, fullName, phone, enrollment, semester, department
+        uid, email, passwordHash, fullName, phone, enrollment, semester, department, isVerified: true
       });
 
-      // Auto login after signup
+      await whitelistStudent.update({ isClaimed: true });
+
       const accessToken = signAccessToken(uid, newUser.role);
       callback({ success: true, accessToken, user: { uid, role: newUser.role, fullName } });
     } catch (err) {
@@ -71,6 +104,8 @@ io.on("connection", (socket) => {
       const user = await User.findOne({ where: { email } });
       if (!user) return callback({ error: "Invalid credentials" });
 
+      if (user.suspended) return callback({ error: "Your account is suspended. Please contact the administrator." });
+
       const ok = await bcrypt.compare(password, user.passwordHash);
       if (!ok) return callback({ error: "Invalid credentials" });
 
@@ -82,14 +117,14 @@ io.on("connection", (socket) => {
     }
   });
 
-  // --- DATA EVENTS ---
   socket.on("fetchDashboardData", async (data, callback) => {
     try {
       const { uid } = data;
-      const books = await BorrowedBook.findAll({ where: { userId: uid } });
+      const books = await BorrowedBook.findAll({ 
+        where: { userId: uid, returned: { [Op.or]: [false, 0] } } 
+      });
       callback({ success: true, books });
     } catch (err) {
-      console.error(err);
       callback({ error: "Failed to fetch dashboard data" });
     }
   });
@@ -97,13 +132,12 @@ io.on("connection", (socket) => {
   socket.on("fetchLogs", async (data, callback) => {
     try {
       const { uid } = data;
-      const logs = await ActivityLog.findAll({ 
-          where: { userId: uid }, 
-          order: [['timestamp', 'DESC']] 
+      const logs = await ActivityLog.findAll({
+        where: { userId: uid },
+        order: [['timestamp', 'DESC']]
       });
       callback({ success: true, logs });
     } catch (err) {
-      console.error(err);
       callback({ error: "Failed to fetch logs" });
     }
   });
@@ -116,27 +150,22 @@ io.on("connection", (socket) => {
       newDueDate.setDate(newDueDate.getDate() + 7);
 
       await BorrowedBook.update(
-          { dueDate: newDueDate, renewed: true },
-          { where: { id: bookId } }
+        { dueDate: newDueDate, renewed: true },
+        { where: { id: bookId } }
       );
-      
-      // Emit an update to everyone or just the specific room if implemented
-      io.emit("bookUpdated", { bookId, newDueDate });
-      
+
+      io.emit("bookUpdated");
       callback({ success: true, newDueDate });
     } catch (err) {
-      console.error(err);
       callback({ error: "Failed to renew book" });
     }
   });
 
-  // --- BOOK INVENTORY ENDPOINTS ---
   socket.on("fetchAllBooks", async (callback) => {
     try {
       const books = await Book.findAll();
       callback({ success: true, books });
     } catch (err) {
-      console.error("fetchAllBooks Error:", err);
       callback({ error: "Failed to fetch books" });
     }
   });
@@ -144,49 +173,59 @@ io.on("connection", (socket) => {
   socket.on("addBook", async (data, callback) => {
     try {
       const { isbn, title, author, department, description, quantity, eBookLink } = data;
-      
       const existing = await Book.findOne({ where: { isbn } });
       if (existing) {
-        // Update existing book
         existing.quantity += quantity;
         existing.available += quantity;
         await existing.save();
       } else {
-        // Create new book
         await Book.create({
           isbn, title, author, department, description, quantity, available: quantity, eBookLink
         });
       }
-      
-      // Broadcast update
       const books = await Book.findAll();
       io.emit("booksUpdated", books);
-      
       callback({ success: true });
     } catch (err) {
-      console.error("addBook Error:", err);
       callback({ error: "Failed to add book" });
     }
   });
 
-  // --- BARCODE SCANNER ENDPOINTS ---
+  // --- BARCODE SCANNER ENDPOINTS (FIXED) ---
   socket.on("scanBook", async (data, callback) => {
     try {
       const { isbn, uid } = data;
       const book = await Book.findOne({ where: { isbn } });
       if (!book) return callback({ success: false, found: false });
 
-      // Check if user already borrowed this book
-      const borrowRecord = await BorrowedBook.findOne({ 
-          where: { userId: uid, bookId: isbn, returned: false } 
+      // Find user role
+      const user = await User.findOne({ where: { uid } });
+      const isAdmin = user && user.role === "admin";
+
+      // Check if THIS user has borrowed this book
+      const myActiveBorrow = await BorrowedBook.findOne({
+        where: { 
+          bookId: isbn, 
+          userId: uid, 
+          returned: { [Op.or]: [false, 0] } 
+        }
       });
-      
-      callback({ 
-        success: true, 
-        found: true, 
-        book, 
-        isReturn: !!borrowRecord,
-        borrowRecord
+
+      // Check if ANYONE has borrowed this book
+      const anyActiveBorrow = await BorrowedBook.findOne({
+        where: {
+          bookId: isbn,
+          returned: { [Op.or]: [false, 0] }
+        }
+      });
+
+      callback({
+        success: true,
+        found: true,
+        book,
+        isReturn: isAdmin ? !!anyActiveBorrow : !!myActiveBorrow, // Admin can return if anyone borrowed it
+        myBorrow: !!myActiveBorrow,
+        anyBorrow: !!anyActiveBorrow
       });
     } catch (err) {
       console.error("scanBook Error:", err);
@@ -201,42 +240,77 @@ io.on("connection", (socket) => {
       if (!book) return callback({ error: "Book not found" });
 
       if (actionType === "issue") {
+        // Prevent double borrowing
+        const alreadyBorrowed = await BorrowedBook.findOne({
+          where: { bookId: isbn, userId: uid, returned: { [Op.or]: [false, 0] } }
+        });
+        if (alreadyBorrowed) return callback({ error: "You already have this book" });
+
         if (book.available <= 0) return callback({ error: "Book is out of stock" });
-        
+
         book.available -= 1;
         await book.save();
 
         const dueDate = new Date();
         dueDate.setDate(dueDate.getDate() + 14);
 
-        const newBorrow = await BorrowedBook.create({
+        await BorrowedBook.create({
           userId: uid,
           bookId: isbn,
           title: book.title,
           dueDate,
-          renewed: false,
           returned: false,
           issuedAt: new Date()
         });
-        
+
       } else if (actionType === "return") {
-        const borrowRecord = await BorrowedBook.findOne({ 
-            where: { userId: uid, bookId: isbn, returned: false } 
-        });
-        if (!borrowRecord) return callback({ error: "No active borrow record found" });
+        // Find user to check role
+        const user = await User.findOne({ where: { uid } });
+        const isAdmin = user && user.role === "admin";
+
+        let borrowRecord;
+        if (isAdmin) {
+          // If admin is returning it, find the active borrow record (oldest first)
+          borrowRecord = await BorrowedBook.findOne({
+            where: { 
+              bookId: isbn, 
+              returned: { [Op.or]: [false, 0] } 
+            },
+            order: [['issuedAt', 'ASC']]
+          });
+        } else {
+          // If student is returning it, find their own active borrow record
+          borrowRecord = await BorrowedBook.findOne({
+            where: { 
+              bookId: isbn, 
+              userId: uid, 
+              returned: { [Op.or]: [false, 0] } 
+            }
+          });
+        }
+
+        if (!borrowRecord) {
+          return callback({ error: isAdmin ? "No active borrow record found for this book in the library" : "No active borrow record found for your account" });
+        }
 
         book.available = Math.min(book.available + 1, book.quantity);
         await book.save();
 
-        borrowRecord.returned = true;
-        borrowRecord.returnedAt = new Date();
-        await borrowRecord.save();
+        const now = new Date();
+        await borrowRecord.update({ returned: true, returnedAt: now });
+
+        await ReturnedBook.create({
+          userId: borrowRecord.userId, // Save the actual borrower's userId, not the admin's uid!
+          bookId: isbn,
+          title: book.title,
+          issuedAt: borrowRecord.issuedAt,
+          returnedAt: now
+        });
       }
 
-      // Broadcast changes
       const books = await Book.findAll();
       io.emit("booksUpdated", books);
-      io.emit("bookUpdated"); // Trigger dashboard refresh
+      io.emit("bookUpdated"); 
 
       callback({ success: true });
     } catch (err) {
@@ -245,62 +319,388 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("fetchReturnedBooks", async (data, callback) => {
+    try {
+      const { uid } = data;
+      const books = await ReturnedBook.findAll({
+        where: { userId: uid },
+        order: [['returnedAt', 'DESC']]
+      });
+      callback({ success: true, books });
+    } catch (err) {
+      callback({ error: "Failed to fetch returned books" });
+    }
+  });
+
+  // --- Student Profile Handlers ---
+  socket.on("fetchProfile", async (data, callback) => {
+    try {
+      const { uid } = data;
+      const user = await User.findOne({ where: { uid } });
+      if (!user) return callback({ error: "User not found" });
+      callback({
+        success: true,
+        user: {
+          fullName: user.fullName,
+          enrollment: user.enrollment,
+          semester: user.semester,
+          department: user.department,
+          email: user.email,
+          phone: user.phone
+        }
+      });
+    } catch (err) {
+      callback({ error: "Failed to fetch profile" });
+    }
+  });
+
+  socket.on("updateProfile", async (data, callback) => {
+    try {
+      const { uid, fullName, enrollment, semester, department } = data;
+      const user = await User.findOne({ where: { uid } });
+      if (!user) return callback({ error: "User not found" });
+      await user.update({ fullName, enrollment, semester, department });
+      callback({ success: true });
+    } catch (err) {
+      callback({ error: "Failed to update profile" });
+    }
+  });
+
+  // --- Admin Dashboard Handlers ---
+  socket.on("adminFetchAllData", async (callback) => {
+    try {
+      const users = await User.findAll({ order: [['createdAt', 'DESC']] });
+      const books = await Book.findAll({ order: [['createdAt', 'DESC']] });
+      const borrowedBooks = await BorrowedBook.findAll({ order: [['issuedAt', 'DESC']] });
+      const activityLogs = await ActivityLog.findAll({ order: [['timestamp', 'DESC']] });
+      const whitelist = await Whitelist.findAll({ order: [['enrollment', 'ASC']] });
+      callback({ success: true, users, books, borrowedBooks, activityLogs, whitelist });
+    } catch (err) {
+      console.error("adminFetchAllData error:", err);
+      callback({ error: "Failed to fetch admin data" });
+    }
+  });
+
+  socket.on("adminToggleSuspend", async (data, callback) => {
+    try {
+      const { uid, currentStatus } = data;
+      const user = await User.findOne({ where: { uid } });
+      if (!user) return callback({ error: "User not found" });
+      await user.update({ suspended: !currentStatus });
+      io.emit("adminDataUpdated");
+      callback({ success: true });
+    } catch (err) {
+      callback({ error: "Failed to update user status" });
+    }
+  });
+
+  socket.on("adminForceExit", async (data, callback) => {
+    try {
+      const { uid } = data;
+      const activeLog = await ActivityLog.findOne({
+        where: { userId: uid, status: 1 }
+      });
+      if (!activeLog) return callback({ error: "User is not inside library" });
+      const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      await activeLog.update({ status: 0, timeOut: timeStr });
+      io.emit("adminDataUpdated");
+      callback({ success: true });
+    } catch (err) {
+      callback({ error: "Failed to force exit student" });
+    }
+  });
+
+  socket.on("adminDeleteBook", async (data, callback) => {
+    try {
+      const { isbn } = data;
+      const book = await Book.findOne({ where: { isbn } });
+      if (!book) return callback({ error: "Book not found" });
+      const borrowed = book.quantity - book.available;
+      if (borrowed > 0) return callback({ error: `Cannot delete. ${borrowed} copies are currently borrowed.` });
+      await book.destroy();
+      const books = await Book.findAll();
+      io.emit("booksUpdated", books);
+      io.emit("adminDataUpdated");
+      callback({ success: true });
+    } catch (err) {
+      callback({ error: "Failed to delete book" });
+    }
+  });
+
+  socket.on("adminEditBook", async (data, callback) => {
+    try {
+      const { isbn, title, quantity, available } = data;
+      const book = await Book.findOne({ where: { isbn } });
+      if (!book) return callback({ error: "Book not found" });
+      await book.update({ title, quantity, available });
+      const books = await Book.findAll();
+      io.emit("booksUpdated", books);
+      io.emit("adminDataUpdated");
+      callback({ success: true });
+    } catch (err) {
+      callback({ error: "Failed to edit book" });
+    }
+  });
+
+  socket.on("adminDeleteWhitelist", async (data, callback) => {
+    try {
+      const { enrollment } = data;
+      const student = await Whitelist.findOne({ where: { enrollment } });
+      if (!student) return callback({ error: "Student not found in whitelist" });
+      await student.destroy();
+      io.emit("adminDataUpdated");
+      callback({ success: true });
+    } catch (err) {
+      callback({ error: "Failed to delete whitelist student" });
+    }
+  });
+
+  socket.on("adminAddWhitelist", async (data, callback) => {
+    try {
+      const { enrollment, name, email, phone, department } = data;
+      const existing = await Whitelist.findOne({ where: { enrollment } });
+      if (existing) return callback({ error: "Enrollment already whitelisted" });
+      await Whitelist.create({ enrollment, name, email, phone, department, isClaimed: false });
+      io.emit("adminDataUpdated");
+      callback({ success: true });
+    } catch (err) {
+      callback({ error: "Failed to add student to whitelist" });
+    }
+  });
+
+  socket.on("adminBulkUploadWhitelist", async (data, callback) => {
+    try {
+      const { students } = data;
+      for (const student of students) {
+        const { enrollment, name, email, phone, department } = student;
+        if (!enrollment) continue;
+        const existing = await Whitelist.findOne({ where: { enrollment } });
+        if (existing) {
+          await existing.update({ name, email, phone, department });
+        } else {
+          await Whitelist.create({ enrollment, name, email, phone, department, isClaimed: false });
+        }
+      }
+      io.emit("adminDataUpdated");
+      callback({ success: true, count: students.length });
+    } catch (err) {
+      console.error("adminBulkUploadWhitelist error:", err);
+      callback({ error: "Failed to bulk upload whitelist" });
+    }
+  });
+
+  socket.on("adminScanGateQR", async (data, callback) => {
+    try {
+      const { enrollment, name, branch, sem, isVerifiedChecked } = data;
+      const user = await User.findOne({ where: { enrollment } });
+      let correctUserId = user ? user.uid : "Unknown";
+
+      if (user && user.isVerified === false) {
+        if (!isVerifiedChecked) {
+          return callback({ success: true, needsVerification: true, user: { uid: user.uid, fullName: user.fullName, enrollment: user.enrollment } });
+        } else {
+          await user.update({ isVerified: true });
+        }
+      }
+
+      const activeLog = await ActivityLog.findOne({
+        where: { enrollment, status: 1 }
+      });
+
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      if (!activeLog) {
+        // CHECK IN
+        await ActivityLog.create({
+          userId: correctUserId,
+          enrollment: enrollment,
+          name: name,
+          branch: branch,
+          sem: sem,
+          status: 1,
+          timeIn: timeStr,
+          timeOut: null
+        });
+        io.emit("adminDataUpdated");
+        callback({ success: true, action: "in", name });
+      } else {
+        // CHECK OUT
+        const checkInTime = activeLog.timestamp ? new Date(activeLog.timestamp) : now;
+        const timeDiffMs = now - checkInTime;
+        const COOLDOWN_MS = 1 * 60 * 1000; // 1 minute cooldown
+
+        if (timeDiffMs < COOLDOWN_MS) {
+          const remainingMinutes = Math.ceil((COOLDOWN_MS - timeDiffMs) / 60000);
+          return callback({ error: `⏳ Wait ${remainingMinutes} min(s) before checking out.` });
+        }
+
+        await activeLog.update({
+          status: 0,
+          timeOut: timeStr
+        });
+        io.emit("adminDataUpdated");
+        callback({ success: true, action: "out", name });
+      }
+    } catch (error) {
+      console.error("adminScanGateQR Error:", error);
+      callback({ error: "Database error during scan" });
+    }
+  });
+
+  socket.on("aiChat", async (data, callback) => {
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey || apiKey === "YOUR_GEMINI_API_KEY_HERE" || apiKey.trim() === "") {
+        return callback({ error: "Gemini API Key is not set in the server's .env file. Please add GEMINI_API_KEY=your_key to activate the AI." });
+      }
+
+      const { message, chatHistory } = data;
+
+      // Fetch library context from SQLite database
+      const books = await Book.findAll();
+      const activeBorrows = await BorrowedBook.findAll({ where: { returned: { [Op.or]: [false, 0] } } });
+      const users = await User.findAll({ where: { role: "user" } });
+      
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayLogs = await ActivityLog.findAll({
+        where: {
+          timestamp: {
+            [Op.gte]: today
+          }
+        }
+      });
+
+      // Prepare database summary for the system instructions
+      const booksSummary = books.map(b => `- ${b.title} (ISBN: ${b.isbn}, Author: ${b.author || 'N/A'}, Dept: ${b.department || 'N/A'}, Stock: ${b.quantity}, Available: ${b.available})`).join("\n");
+      const borrowsSummary = activeBorrows.map(b => `- UserID: ${b.userId}, Book: ${b.title} (ISBN: ${b.bookId}), Issued: ${b.issuedAt ? new Date(b.issuedAt).toLocaleDateString() : 'N/A'}, Due: ${b.dueDate ? new Date(b.dueDate).toLocaleDateString() : 'N/A'}`).join("\n");
+      const usersSummary = users.map(u => `- Name: ${u.fullName}, Email: ${u.email}, Enroll: ${u.enrollment || 'N/A'}, Dept: ${u.department || 'N/A'}, Status: ${u.suspended ? 'Suspended' : 'Active'}`).join("\n");
+      const logsSummary = todayLogs.map(l => `- Student: ${l.name || 'Unknown'}, Enroll: ${l.enrollment || 'N/A'}, IN: ${l.timeIn || '--:--'}, OUT: ${l.timeOut || 'Still Inside'}`).join("\n");
+
+      // Construct system instruction prompt
+      const systemPrompt = `You are "AutoLib AI Assistant", a smart, helpful library bot.
+You help library administrators analyze statistics, check books availability, monitor active loans, and query logs.
+Speak politely and professionally. If the user chats in Hindi/Hinglish, reply in Hindi/Hinglish. If in English, reply in English.
+Today is: ${new Date().toDateString()} (Format: Day Month Date Year).
+
+Here is the live state of the library database:
+---
+[INVENTORY]
+${booksSummary || "No books in catalog."}
+
+[ACTIVE BORROWS]
+${borrowsSummary || "No books currently borrowed."}
+
+[REGISTERED STUDENTS]
+${usersSummary || "No students registered."}
+
+[TODAY'S VISIT LOGS]
+${logsSummary || "No students visited the library today."}
+---
+
+Use this context to answer user questions. For example:
+- If asked about "overdue books", look at the [ACTIVE BORROWS] section and check if any borrow due date is before today (${new Date().toDateString()}).
+- If asked about book availability, look at the [INVENTORY] section and check if 'Available' is greater than 0.
+- If asked about check-in/out logs, look at [TODAY'S VISIT LOGS] or explain recent activity.
+Keep your answers clear, concise, and highlight critical items. If the question is not about the library or stats, answer politely but try to guide them back to library assistance. Do not make up fake books or borrows that are not listed in the context.`;
+
+      // Build payload for Gemini API
+      const contents = [];
+      
+      // Feed chat history to maintain conversation state
+      if (chatHistory && Array.isArray(chatHistory)) {
+        chatHistory.forEach(ch => {
+          contents.push({
+            role: ch.role === "user" ? "user" : "model",
+            parts: [{ text: ch.text }]
+          });
+        });
+      }
+
+      // Add current message
+      contents.push({
+        role: "user",
+        parts: [{ text: message }]
+      });
+
+      // API Endpoint for Google AI Studio Gemini API (using gemini-1.5-flash)
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+
+      const apiResponse = await fetch(geminiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          contents,
+          systemInstruction: {
+            parts: [{ text: systemPrompt }]
+          }
+        })
+      });
+
+      if (!apiResponse.ok) {
+        const errorText = await apiResponse.text();
+        console.error("Gemini API Request Failed:", errorText);
+        return callback({ error: `Gemini API request failed: Status ${apiResponse.status}` });
+      }
+
+      const resJson = await apiResponse.json();
+      
+      if (resJson.error) {
+        console.error("Gemini API returned error:", resJson.error);
+        return callback({ error: resJson.error.message || "Failed to get reply from Gemini AI." });
+      }
+
+      const replyText = resJson.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!replyText) {
+        return callback({ error: "Received empty content response from Gemini AI." });
+      }
+
+      callback({ success: true, reply: replyText });
+    } catch (error) {
+      console.error("aiChat Event Error:", error);
+      callback({ error: "Server Error: " + error.message });
+    }
+  });
+
   socket.on("disconnect", () => {
     console.log("User disconnected:", socket.id);
   });
 });
+
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.static(__dirname));
 
-/* -------------------- Redis -------------------- */
-const redis = createClient({ url: process.env.REDIS_URL });
-redis.on("error", (err) => console.error("Redis error:", err));
-await redis.connect();
-
-/* -------------------- Environment -------------------- */
+const sessionStore = new Map();
 const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || "my_super_secret_access_key_123!";
 const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || "my_super_secret_refresh_key_456!";
 const ACCESS_EXPIRES = Number(process.env.ACCESS_EXPIRES) || 86400;
 const REFRESH_EXPIRES = Number(process.env.REFRESH_EXPIRES) || 604800;
 const PORT = process.env.PORT || 4000;
 
-/* -------------------- Dummy users (example) -------------------- */
 const users = {
   "admin@example.com": {
     id: "uid-admin",
     passwordHash: await bcrypt.hash("admin123", 10),
     role: "admin",
-  },
-  "user@example.com": {
-    id: "uid-user",
-    passwordHash: await bcrypt.hash("user123", 10),
-    role: "user",
-  },
+  }
 };
 
-/* -------------------- Token Generators -------------------- */
 function signAccessToken(userId, role) {
-  return jwt.sign({ sub: userId, role }, ACCESS_SECRET, {
-    expiresIn: ACCESS_EXPIRES,
-  });
+  return jwt.sign({ sub: userId, role }, ACCESS_SECRET, { expiresIn: ACCESS_EXPIRES });
 }
 
 function signRefreshToken(sessionId, userId) {
-  return jwt.sign({ sid: sessionId, sub: userId }, REFRESH_SECRET, {
-    expiresIn: REFRESH_EXPIRES,
-  });
+  return jwt.sign({ sid: sessionId, sub: userId }, REFRESH_SECRET, { expiresIn: REFRESH_EXPIRES });
 }
 
-/* -------------------- AUTH ENDPOINTS -------------------- */
-
-// LOGIN
 app.post("/auth/login", async (req, res) => {
   const { email, password } = req.body;
-
   const user = users[email];
   if (!user) return res.status(401).json({ error: "Invalid credentials" });
-
   const ok = await bcrypt.compare(password, user.passwordHash);
   if (!ok) return res.status(401).json({ error: "Invalid credentials" });
 
@@ -308,110 +708,50 @@ app.post("/auth/login", async (req, res) => {
   const refreshToken = signRefreshToken(sessionId, user.id);
   const accessToken = signAccessToken(user.id, user.role);
 
-  // Save refresh session in Redis
-  await redis.set(
-    `refresh:${sessionId}`,
-    JSON.stringify({ userId: user.id, role: user.role }),
-    { EX: REFRESH_EXPIRES }
-  );
+  sessionStore.set(`refresh:${sessionId}`, JSON.stringify({ userId: user.id, role: user.role }));
+  setTimeout(() => sessionStore.delete(`refresh:${sessionId}`), REFRESH_EXPIRES * 1000);
 
-  // Set refresh token as secure httpOnly cookie
   res.cookie("refresh_token", refreshToken, {
-    httpOnly: true,
-    secure: true,
-    sameSite: "lax",
-    maxAge: REFRESH_EXPIRES * 1000,
+    httpOnly: true, secure: true, sameSite: "lax", maxAge: REFRESH_EXPIRES * 1000,
   });
 
-  res.json({
-    message: "Login successful",
-    accessToken: accessToken,
-    role: user.role,
-  });
+  res.json({ message: "Login successful", accessToken, role: user.role });
 });
 
-// REFRESH
 app.post("/auth/refresh", async (req, res) => {
   const token = req.cookies.refresh_token;
   if (!token) return res.status(401).json({ error: "No refresh token" });
-
   try {
     const payload = jwt.verify(token, REFRESH_SECRET);
-    const { sid, sub } = payload;
-
-    const session = await redis.get(`refresh:${sid}`);
+    const session = sessionStore.get(`refresh:${payload.sid}`);
     if (!session) return res.status(401).json({ error: "Session expired" });
-
     const data = JSON.parse(session);
-
     const newSid = randomBytes(16).toString("hex");
-    const newRefresh = signRefreshToken(newSid, sub);
-    const newAccess = signAccessToken(sub, data.role);
-
-    await redis.del(`refresh:${sid}`);
-    await redis.set(
-      `refresh:${newSid}`,
-      JSON.stringify(data),
-      { EX: REFRESH_EXPIRES }
-    );
-
-    res.cookie("refresh_token", newRefresh, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "lax",
-      maxAge: REFRESH_EXPIRES * 1000,
-    });
-
+    const newAccess = signAccessToken(payload.sub, data.role);
     res.json({ accessToken: newAccess });
   } catch (err) {
     res.status(401).json({ error: "Invalid token" });
   }
 });
 
-// LOGOUT
 app.post("/auth/logout", async (req, res) => {
-  const token = req.cookies.refresh_token;
-  if (token) {
-    try {
-      const payload = jwt.verify(token, REFRESH_SECRET);
-      await redis.del(`refresh:${payload.sid}`);
-    } catch (e) {}
-  }
   res.clearCookie("refresh_token");
   res.json({ message: "Logged out" });
 });
 
-/* -------------------- PROTECTED ROUTE -------------------- */
 function authenticate(req, res, next) {
   const auth = req.headers.authorization;
   if (!auth) return res.status(401).json({ error: "Missing token" });
-
-  const token = auth.split(" ")[1];
-
   try {
-    const payload = jwt.verify(token, ACCESS_SECRET);
-    req.user = payload;
+    req.user = jwt.verify(auth.split(" ")[1], ACCESS_SECRET);
     next();
   } catch (e) {
     return res.status(401).json({ error: "Invalid token" });
   }
 }
 
-app.get("/admin/data", authenticate, (req, res) => {
-  if (req.user.role !== "admin")
-    return res.status(403).json({ error: "Forbidden" });
-
-  res.json({ message: "Admin secret data" });
-});
-
-app.get("/user/data", authenticate, (req, res) => {
-  res.json({ message: "User data", userId: req.user.sub });
-});
-
-// Fallback route to serve index.html for unknown routes (SPA behavior)
 app.get(/.*/, (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-/* -------------------- START SERVER -------------------- */
 httpServer.listen(PORT, () => console.log(`Auth server running on port ${PORT}`));

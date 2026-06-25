@@ -121,6 +121,24 @@ window.renewBook = async (docId, currentDueDateStr) => {
     }
 };
 
+// --- RETURN LOGIC ---
+window.returnBook = async (bookId) => {
+    const confirmReturn = confirm("Do you want to return this book?");
+    if (!confirmReturn) return;
+
+    if (typeof socket !== 'undefined') {
+        socket.emit("transactionBook", { isbn: bookId, uid: uid, actionType: "return" }, (res) => {
+            if (res.error) {
+                alert("Failed to return book: " + res.error);
+            } else {
+                alert("✅ Book returned successfully!");
+                fetchBorrowedBooks(); // Refresh UI
+                fetchReturnedBooks(); // Refresh Return History
+            }
+        });
+    }
+};
+
 function fetchBorrowedBooks() {
     if (typeof socket === 'undefined') return;
     
@@ -173,15 +191,18 @@ function fetchBorrowedBooks() {
                     }
                 }
 
-                let renewButton = `<span class="text-xs text-gray-400">N/A</span>`;
+                let actionCell = `<span class="text-xs text-gray-400">N/A</span>`;
 
                 if (dueVal && validIsoDate) {
-                    // Note: Use data._id since MongoDB uses _id instead of Firebase's doc.id
-                    renewButton = `<button onclick="window.renewBook('${data._id}', '${validIsoDate}')" class="bg-blue-50 hover:bg-blue-100 text-blue-600 font-medium py-1.5 px-3 rounded text-xs transition-colors border border-blue-200"><i class="fas fa-redo-alt mr-1"></i> Renew</button>`;
+                    let renewBtn = `<button onclick="window.renewBook('${data.id}', '${validIsoDate}')" class="bg-blue-50 hover:bg-blue-100 text-blue-600 font-medium py-1.5 px-3 rounded text-xs transition-colors border border-blue-200"><i class="fas fa-redo-alt mr-1"></i> Renew</button>`;
 
                     if (diffDays < -3) {
-                        renewButton = `<span class="text-xs text-red-500 italic">See Librarian</span>`;
+                        renewBtn = `<span class="text-xs text-red-500 italic">See Librarian</span>`;
                     }
+
+                    let returnBtn = `<button onclick="window.returnBook('${data.bookId}')" class="bg-orange-50 hover:bg-orange-100 text-orange-600 font-medium py-1.5 px-3 rounded text-xs transition-colors border border-orange-200"><i class="fas fa-undo mr-1"></i> Return</button>`;
+
+                    actionCell = `<div class="flex items-center space-x-2">${renewBtn} ${returnBtn}</div>`;
                 }
 
                 tableRows += `
@@ -190,7 +211,7 @@ function fetchBorrowedBooks() {
                         <td class="px-6 py-4 text-sm text-gray-500">${borrowedDateStr}</td>
                         <td class="px-6 py-4 text-sm text-gray-500">${dueDateStr}</td>
                         <td class="px-6 py-4 whitespace-nowrap">${statusBadge}</td>
-                        <td class="px-6 py-4 whitespace-nowrap">${renewButton}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">${actionCell}</td>
                     </tr>
                 `;
             }
@@ -207,16 +228,136 @@ function fetchBorrowedBooks() {
                 tableBody.innerHTML = tableRows;
             }
         }
+
+        // --- Return History ---
+        const returnBody = document.getElementById('returnHistoryTable');
+        let returnedCount = 0;
+        let returnRows = '';
+
+        res.books.forEach(data => {
+            if (data.returned) {
+                returnedCount++;
+                const borrowedDateStr = data.issuedAt ? new Date(data.issuedAt).toLocaleDateString() : 'N/A';
+                const returnedDateStr = data.returnedAt ? new Date(data.returnedAt).toLocaleDateString() : 'N/A';
+
+                returnRows += `
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-6 py-4 text-sm font-medium text-gray-900">${data.title || data.bookTitle || 'Unknown Book'}</td>
+                        <td class="px-6 py-4 text-sm text-gray-500">${borrowedDateStr}</td>
+                        <td class="px-6 py-4 text-sm text-gray-500">${returnedDateStr}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                                <i class="fas fa-check mr-1"></i>Returned
+                            </span>
+                        </td>
+                    </tr>
+                `;
+            }
+        });
+
+        const returnedEl = document.getElementById('booksReturnedCount');
+        if (returnedEl) returnedEl.textContent = returnedCount;
+
+        if (returnBody) {
+            if (returnRows === '') {
+                returnBody.innerHTML = `<tr><td colspan="4" class="px-6 py-4 text-center text-sm text-gray-500">No return history yet.</td></tr>`;
+            } else {
+                returnBody.innerHTML = returnRows;
+            }
+        }
     });
 }
 
 // Initial fetch
 fetchBorrowedBooks();
 
-// Listen for updates from server to refresh live
+// --- Return History (dedicated ReturnedBook table) ---
+function fetchReturnedBooks() {
+    if (typeof socket === 'undefined') return;
+
+    socket.emit("fetchReturnedBooks", { uid }, (res) => {
+        const returnBody = document.getElementById('returnHistoryTable');
+        const returnedEl = document.getElementById('booksReturnedCount');
+
+        if (!res.success) {
+            if (returnBody) returnBody.innerHTML = `<tr><td colspan="4" class="px-6 py-4 text-center text-sm text-red-500">Error loading return history.</td></tr>`;
+            return;
+        }
+
+        if (returnedEl) returnedEl.textContent = res.books.length;
+
+        if (!returnBody) return;
+
+        if (res.books.length === 0) {
+            returnBody.innerHTML = `<tr><td colspan="4" class="px-6 py-4 text-center text-sm text-gray-500">No return history yet.</td></tr>`;
+            return;
+        }
+
+        let rows = '';
+        res.books.forEach(data => {
+            const borrowedDateStr = data.issuedAt ? new Date(data.issuedAt).toLocaleDateString() : 'N/A';
+            const returnedDateStr = data.returnedAt ? new Date(data.returnedAt).toLocaleDateString() : 'N/A';
+            rows += `
+                <tr class="hover:bg-gray-50">
+                    <td class="px-6 py-4 text-sm font-medium text-gray-900">${data.title || 'Unknown Book'}</td>
+                    <td class="px-6 py-4 text-sm text-gray-500">${borrowedDateStr}</td>
+                    <td class="px-6 py-4 text-sm text-gray-500">${returnedDateStr}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                            <i class="fas fa-check mr-1"></i>Returned
+                        </span>
+                    </td>
+                </tr>
+            `;
+        });
+        returnBody.innerHTML = rows;
+    });
+}
+
+// Initial fetch of return history
+fetchReturnedBooks();
+
+// Listen for live updates from server
 if (typeof socket !== 'undefined') {
     socket.on("bookUpdated", () => {
         fetchBorrowedBooks();
+    });
+
+    // Real-time return history update
+    socket.on("returnedBooksUpdated", (books) => {
+        const returnBody = document.getElementById('returnHistoryTable');
+        const returnedEl = document.getElementById('booksReturnedCount');
+
+        // Filter only this user's returns
+        const myReturns = books.filter(b => b.userId === uid);
+
+        if (returnedEl) returnedEl.textContent = myReturns.length;
+
+        if (!returnBody) return;
+
+        if (myReturns.length === 0) {
+            returnBody.innerHTML = `<tr><td colspan="4" class="px-6 py-4 text-center text-sm text-gray-500">No return history yet.</td></tr>`;
+            return;
+        }
+
+        let rows = '';
+        myReturns.forEach(data => {
+            const borrowedDateStr = data.issuedAt ? new Date(data.issuedAt).toLocaleDateString() : 'N/A';
+            const returnedDateStr = data.returnedAt ? new Date(data.returnedAt).toLocaleDateString() : 'N/A';
+            rows += `
+                <tr class="hover:bg-gray-50">
+                    <td class="px-6 py-4 text-sm font-medium text-gray-900">${data.title || 'Unknown Book'}</td>
+                    <td class="px-6 py-4 text-sm text-gray-500">${borrowedDateStr}</td>
+                    <td class="px-6 py-4 text-sm text-gray-500">${returnedDateStr}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                            <i class="fas fa-check mr-1"></i>Returned
+                        </span>
+                    </td>
+                </tr>
+            `;
+        });
+        returnBody.innerHTML = rows;
     });
 }
 
