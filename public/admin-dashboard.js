@@ -546,31 +546,53 @@ function handleScan(decodedText) {
     });
 }
 
-function openScanner() {
+async function openScanner() {
     scannerModal.classList.remove('hidden');
-    if (!html5QrcodeScanner) {
-        const scannerConfig = {
-            fps: 15,
-            qrbox: { width: 300, height: 300 },
-            disableFlip: false,
-            formatsToSupport: [window.Html5QrcodeSupportedFormats.QR_CODE],
-            videoConstraints: {
-                facingMode: "environment",
-                width: { min: 640, ideal: 1280, max: 1920 },
-                height: { min: 480, ideal: 720, max: 1080 }
+    if (html5QrcodeScanner) {
+        try { await html5QrcodeScanner.clear(); } catch(e){}
+    }
+    
+    html5QrcodeScanner = new Html5Qrcode("reader");
+    
+    try {
+        const devices = await Html5Qrcode.getCameras();
+        if (devices && devices.length) {
+            let cameraId = devices[0].id;
+            for (let i = 0; i < devices.length; i++) {
+                let label = devices[i].label.toLowerCase();
+                if (label.includes("back") || label.includes("environment") || label.includes("rear")) {
+                    cameraId = devices[i].id;
+                    break;
+                }
             }
-        };
-        html5QrcodeScanner = new window.Html5QrcodeScanner("reader", scannerConfig, false);
-        html5QrcodeScanner.render(handleScan, () => {});
+            
+            await html5QrcodeScanner.start(
+                cameraId,
+                { fps: 15, qrbox: { width: 300, height: 300 } },
+                (decodedText) => {
+                    handleScan(decodedText);
+                },
+                (err) => {}
+            );
+        } else {
+            alert("No cameras found on your device.");
+        }
+    } catch (err) {
+        console.error("Gate Scanner start error:", err);
+        alert("Camera error: Ensure you have granted permissions.");
     }
 }
 
-function closeScanner() {
+async function closeScanner() {
     scannerModal.classList.add('hidden');
     if (html5QrcodeScanner) {
-        html5QrcodeScanner.clear().then(() => {
-            html5QrcodeScanner = null;
-        }).catch(err => console.error("Failed to clear scanner", err));
+        try {
+            await html5QrcodeScanner.stop();
+            html5QrcodeScanner.clear();
+        } catch (err) {
+            console.error("Failed to stop gate scanner", err);
+        }
+        html5QrcodeScanner = null;
     }
 }
 
