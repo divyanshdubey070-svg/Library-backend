@@ -298,6 +298,9 @@ document.addEventListener("DOMContentLoaded", () => {
                     confirmBtn.classList.add("hidden");
                     scanAnotherBtn.textContent = "Start Next Scan Flow";
                     scanAnotherBtn.classList.remove("hidden");
+                    if (typeof window.refreshData === 'function') {
+                        window.refreshData();
+                    }
                 } else {
                     alert("Action Failed: " + transRes.error);
                     confirmBtn.disabled = false;
@@ -345,7 +348,7 @@ document.addEventListener("DOMContentLoaded", () => {
           document.getElementById("addBookModal")?.classList.remove("hidden");
       }
   });
-  document.getElementById("openScannerBtn")?.addEventListener("click", () => {
+  document.getElementById("openBookScannerBtn")?.addEventListener("click", () => {
       isScanningForForm = false;
       openBarcodeScanner();
   });

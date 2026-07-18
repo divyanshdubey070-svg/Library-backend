@@ -113,7 +113,7 @@
                             <h1 class="text-2xl font-semibold text-gray-900">WELCOME</h1>
                         </div>
                         <div class="flex items-center space-x-4">
-                            <button id="openScannerBtn"
+                            <button id="openGateScannerBtn"
                                 class="p-2 text-gray-400 hover:text-gray-500 transition-colors relative">
                                 <i class="fas fa-qrcode mr-2"></i> Scan QR
                             </button>
@@ -161,6 +161,10 @@
                 <div class="flex flex-col sm:flex-row justify-between items-center mb-4 space-y-3 sm:space-y-0">
                     <h2 class="text-lg font-semibold text-gray-800">System Logs & Management</h2>
                     <div class="flex space-x-3 w-full sm:w-auto">
+                        <button id="openBookScannerBtn"
+                            class="flex-1 sm:flex-none bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm">
+                            <i class="fas fa-qrcode mr-2"></i> Scan to Issue/Return
+                        </button>
                         <button id="btnManualTrans"
                             class="flex-1 sm:flex-none bg-primary hover:bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm">
                             <i class="fas fa-handshake mr-2"></i> Manual Issue/Return
@@ -353,7 +357,25 @@
             </div>
         </div>
 
+        <!-- Barcode Modal for Issue/Return -->
+        <div id="barcodeModal" class="fixed inset-0 z-50 hidden">
+            <div class="fixed inset-0 bg-black bg-opacity-50" id="barcodeModalOverlay"></div>
+            <div class="fixed inset-0 flex items-center justify-center p-4">
+                <div class="bg-white rounded-xl p-6 max-w-md w-full z-10">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-semibold text-gray-900">Barcode Scanner</h3>
+                        <button id="closeBarcodeModal" class="text-gray-400 hover:text-gray-600"><i
+                                class="fas fa-times text-xl"></i></button>
+                    </div>
+                    <div class="bg-gray-100 h-64 rounded-lg flex items-center justify-center mb-4 relative">
+                        <div id="scannerContainer" class="w-full h-full"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <script type="module" src="admin-dashboard.js"></script>
+        <script src="barcode_scanner.js"></script>
         <script src="ai-chatbot.js" defer></script>
 </body>
 </html>

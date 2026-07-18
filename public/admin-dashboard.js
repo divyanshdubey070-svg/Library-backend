@@ -481,7 +481,7 @@ $('manualTransForm').addEventListener('submit', (e) => {
 
 /* ------------- Gate Scanner (Check-in/out) ------------- */
 const scannerModal = $('scannerModal');
-const openScannerBtn = $('openScannerBtn');
+const openGateScannerBtn = $('openGateScannerBtn');
 const closeScannerModal = $('closeScannerModal');
 const scannerModalOverlay = $('scannerModalOverlay');
 const messageBox = $('scanMessage');
@@ -574,7 +574,7 @@ function closeScanner() {
     }
 }
 
-if (openScannerBtn) openScannerBtn.addEventListener('click', openScanner);
+if (openGateScannerBtn) openGateScannerBtn.addEventListener('click', openScanner);
 if (closeScannerModal) closeScannerModal.addEventListener('click', closeScanner);
 if (scannerModalOverlay) scannerModalOverlay.addEventListener('click', closeScanner);
 
