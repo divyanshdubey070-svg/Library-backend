@@ -246,6 +246,19 @@ io.on("connection", (socket) => {
         });
         if (alreadyBorrowed) return callback({ error: "You already have this book" });
 
+        // 24-hour borrow limit check
+        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const recentlyBorrowed = await BorrowedBook.findOne({
+          where: {
+            bookId: isbn,
+            userId: uid,
+            issuedAt: { [Op.gte]: twentyFourHoursAgo }
+          }
+        });
+        if (recentlyBorrowed) {
+          return callback({ error: "This book can only be borrowed once every 24 hours. Please return tomorrow." });
+        }
+
         if (book.available <= 0) return callback({ error: "Book is out of stock" });
 
         book.available -= 1;
@@ -439,6 +452,29 @@ io.on("connection", (socket) => {
       callback({ success: true });
     } catch (err) {
       callback({ error: "Failed to edit book" });
+    }
+  });
+
+  socket.on("findStudentByEnrollment", async (data, callback) => {
+    try {
+      const { enrollment } = data;
+      const user = await User.findOne({ where: { enrollment } });
+      if (!user) {
+        return callback({ error: "Student not registered. Please sign up first." });
+      }
+      callback({
+        success: true,
+        user: {
+          uid: user.uid,
+          fullName: user.fullName,
+          enrollment: user.enrollment,
+          department: user.department,
+          semester: user.semester
+        }
+      });
+    } catch (err) {
+      console.error("findStudentByEnrollment error:", err);
+      callback({ error: "Database error during student lookup" });
     }
   });
 
