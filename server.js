@@ -119,6 +119,30 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("forgotPassword", async (data, callback) => {
+    try {
+      const { email, enrollment, phone, newPassword } = data;
+      const user = await User.findOne({ 
+        where: { 
+          email: email.toLowerCase(), 
+          enrollment: enrollment.trim(), 
+          phone: phone.trim() 
+        } 
+      });
+      
+      if (!user) {
+        return callback({ error: "Identity verification failed. Information does not match official records." });
+      }
+
+      const passwordHash = await bcrypt.hash(newPassword, 10);
+      await user.update({ passwordHash });
+      callback({ success: true });
+    } catch (err) {
+      console.error("forgotPassword error:", err);
+      callback({ error: "Failed to reset password" });
+    }
+  });
+
   socket.on("fetchDashboardData", async (data, callback) => {
     try {
       const { uid } = data;
