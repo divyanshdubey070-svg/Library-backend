@@ -888,6 +888,37 @@ function authenticate(req, res, next) {
   }
 }
 
+// TEMPORARY: One-time data reset endpoint (remove after use)
+app.post("/admin/reset-data", async (req, res) => {
+  try {
+    const secret = req.headers["x-reset-secret"];
+    if (secret !== "autolib-reset-2026") {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+
+    // Clear all activity logs
+    await ActivityLog.destroy({ where: {} });
+    // Clear all borrowed books
+    await BorrowedBook.destroy({ where: {} });
+    // Clear all returned books
+    await ReturnedBook.destroy({ where: {} });
+    // Clear all books
+    await Book.destroy({ where: {} });
+    // Clear all whitelist entries
+    await Whitelist.destroy({ where: {} });
+    // Remove all users EXCEPT admin
+    await User.destroy({ where: { role: { [Op.ne]: "admin" } } });
+
+    res.json({ 
+      success: true, 
+      message: "All data cleared. Only admin user remains." 
+    });
+  } catch (err) {
+    console.error("Reset Error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get(/.*/, (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
