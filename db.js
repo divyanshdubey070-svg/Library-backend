@@ -2,23 +2,40 @@ import { Sequelize, DataTypes } from "sequelize";
 import dotenv from "dotenv";
 dotenv.config();
 
-// Connect to SQLite Local Database
-const sequelize = new Sequelize({
-    dialect: "sqlite",
-    storage: "./database.sqlite", // Data will be stored ONLY in this local file on the PC
-    logging: false
-});
+let sequelize;
+
+if (process.env.DATABASE_URL) {
+    console.log("🔌 Initializing connection to Cloud PostgreSQL Database...");
+    sequelize = new Sequelize(process.env.DATABASE_URL, {
+        dialect: "postgres",
+        dialectOptions: {
+            ssl: {
+                require: true,
+                rejectUnauthorized: false
+            }
+        },
+        logging: false
+    });
+} else {
+    console.log("🔌 Initializing connection to Local Offline SQLite Database...");
+    sequelize = new Sequelize({
+        dialect: "sqlite",
+        storage: "./database.sqlite", // Data will be stored ONLY in this local file on the PC
+        logging: false
+    });
+}
 
 export const connectDB = async () => {
     try {
         await sequelize.authenticate();
-        console.log("✅ Local Offline Database Connected successfully");
+        const dbType = process.env.DATABASE_URL ? "Cloud PostgreSQL" : "Local Offline SQLite";
+        console.log(`✅ ${dbType} Connected successfully`);
         
         // Auto-create/update tables
         await sequelize.sync({ alter: true });
-        console.log("✅ Offline Tables Synced");
+        console.log(`✅ ${dbType} Tables Synced`);
     } catch (error) {
-        console.error("❌ Local Database Connection Error:", error);
+        console.error("❌ Database Connection Error:", error);
         process.exit(1);
     }
 };

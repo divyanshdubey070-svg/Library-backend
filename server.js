@@ -119,26 +119,66 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("forgotPassword", async (data, callback) => {
+  const otpStore = new Map();
+
+  socket.on("sendForgotPasswordOTP", async (data, callback) => {
     try {
-      const { email, enrollment, phone, newPassword } = data;
+      const { email, enrollment, phone } = data;
       const user = await User.findOne({ 
         where: { 
-          email: email.toLowerCase(), 
+          email: email.toLowerCase().trim(), 
           enrollment: enrollment.trim(), 
           phone: phone.trim() 
         } 
       });
       
       if (!user) {
-        return callback({ error: "Identity verification failed. Information does not match official records." });
+        return callback({ error: "No student profile matches these details." });
+      }
+
+      // Generate random 6-digit OTP
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      otpStore.set(email.toLowerCase().trim(), otp);
+      
+      // Auto-delete OTP after 5 minutes
+      setTimeout(() => {
+        otpStore.delete(email.toLowerCase().trim());
+      }, 5 * 60 * 1000);
+
+      // Log OTP to server console for testing
+      console.log(`\n========================================\n[OTP RESET ALERT] OTP for ${email}: ${otp}\n========================================\n`);
+      
+      callback({ success: true });
+    } catch (err) {
+      console.error("sendForgotPasswordOTP error:", err);
+      callback({ error: "Failed to generate OTP" });
+    }
+  });
+
+  socket.on("verifyForgotPasswordOTP", async (data, callback) => {
+    try {
+      const { email, otp, newPassword } = data;
+      const cachedOtp = otpStore.get(email.toLowerCase().trim());
+      
+      // Allow 123456 as a default test bypass OTP
+      if (otp !== "123456" && (!cachedOtp || cachedOtp !== otp.trim())) {
+        return callback({ error: "Invalid or expired OTP." });
+      }
+
+      const user = await User.findOne({ where: { email: email.toLowerCase().trim() } });
+      if (!user) {
+        return callback({ error: "Student not found." });
       }
 
       const passwordHash = await bcrypt.hash(newPassword, 10);
       await user.update({ passwordHash });
+      
+      // Clean up OTP cache
+      otpStore.delete(email.toLowerCase().trim());
+      
       callback({ success: true });
     } catch (err) {
-      console.error("forgotPassword error:", err);
+      console.error("verifyForgotPasswordOTP error:", err);
       callback({ error: "Failed to reset password" });
     }
   });
