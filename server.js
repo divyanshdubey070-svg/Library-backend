@@ -5,6 +5,8 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
+import multer from "multer";
+import fs from "fs";
 
 import { randomBytes } from "crypto";
 import { createServer } from "http";
@@ -889,6 +891,48 @@ function authenticate(req, res, next) {
     return res.status(401).json({ error: "Invalid token" });
   }
 }
+
+// Configure multer storage for PDF uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const dir = "./uploads";
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    cb(null, dir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname);
+    cb(null, file.fieldname + "-" + uniqueSuffix + ext);
+  }
+});
+
+const upload = multer({ 
+  storage: storage,
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === "application/pdf") {
+      cb(null, true);
+    } else {
+      cb(new Error("Only PDF files are allowed!"), false);
+    }
+  }
+});
+
+// Serve the uploads folder statically
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+app.post("/api/upload-pdf", upload.single("pdf"), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+    const fileUrl = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
+    res.json({ success: true, url: fileUrl });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 
 

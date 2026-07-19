@@ -294,6 +294,14 @@
                         <input type="url" id="editBookEbookLink"
                             class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                             placeholder="https://drive.google.com/..." />
+                        <div class="mt-2 flex items-center space-x-2">
+                            <span class="text-sm text-gray-500">Or</span>
+                            <input type="file" id="editBookPDFFile" accept="application/pdf" class="hidden" />
+                            <button type="button" id="editBookPDFUploadBtn" class="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 focus:outline-none flex items-center">
+                                <i class="fas fa-upload mr-2 text-primary"></i> Upload PDF File
+                            </button>
+                            <span id="editBookPDFUploadStatus" class="text-xs text-gray-500"></span>
+                        </div>
                     </div>
                     <div class="flex justify-end space-x-4">
                         <button type="button" id="cancelEditBook"
@@ -375,6 +383,14 @@
                         <input type="url" id="newBookEbookLink"
                             class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                             placeholder="https://drive.google.com/..." />
+                        <div class="mt-2 flex items-center space-x-2">
+                            <span class="text-sm text-gray-500">Or</span>
+                            <input type="file" id="newBookPDFFile" accept="application/pdf" class="hidden" />
+                            <button type="button" id="newBookPDFUploadBtn" class="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 focus:outline-none flex items-center">
+                                <i class="fas fa-upload mr-2 text-primary"></i> Upload PDF File
+                            </button>
+                            <span id="newBookPDFUploadStatus" class="text-xs text-gray-500"></span>
+                        </div>
                     </div>
                     <div class="flex justify-end space-x-4">
                         <button type="button" id="cancelAddBook"
@@ -694,6 +710,60 @@
                 });
             }
         });
+
+        // Helper function for uploading PDFs
+        async function setupPdfUpload(fileInputId, uploadBtnId, statusId, linkInputId) {
+            const fileInput = document.getElementById(fileInputId);
+            const uploadBtn = document.getElementById(uploadBtnId);
+            const statusSpan = document.getElementById(statusId);
+            const linkInput = document.getElementById(linkInputId);
+
+            uploadBtn.addEventListener('click', () => fileInput.click());
+
+            fileInput.addEventListener('change', async () => {
+                if (fileInput.files.length === 0) return;
+                const file = fileInput.files[0];
+                if (file.type !== 'application/pdf') {
+                    alert('Only PDF files are allowed!');
+                    return;
+                }
+
+                statusSpan.textContent = "Uploading...";
+                statusSpan.className = "text-xs text-blue-500 font-semibold";
+                uploadBtn.disabled = true;
+
+                const formData = new FormData();
+                formData.append('pdf', file);
+
+                try {
+                    const response = await fetch('/api/upload-pdf', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const res = await response.json();
+                    if (res.success) {
+                        linkInput.value = res.url;
+                        statusSpan.textContent = "✅ Uploaded!";
+                        statusSpan.className = "text-xs text-green-600 font-semibold";
+                    } else {
+                        statusSpan.textContent = "❌ Upload Failed";
+                        statusSpan.className = "text-xs text-red-600 font-semibold";
+                        alert("Upload failed: " + res.error);
+                    }
+                } catch (err) {
+                    console.error("PDF upload error:", err);
+                    statusSpan.textContent = "❌ Upload Failed";
+                    statusSpan.className = "text-xs text-red-600 font-semibold";
+                    alert("Upload error.");
+                } finally {
+                    uploadBtn.disabled = false;
+                }
+            });
+        }
+
+        // Initialize setup for Add and Edit forms
+        setupPdfUpload('newBookPDFFile', 'newBookPDFUploadBtn', 'newBookPDFUploadStatus', 'newBookEbookLink');
+        setupPdfUpload('editBookPDFFile', 'editBookPDFUploadBtn', 'editBookPDFUploadStatus', 'editBookEbookLink');
 
         // NOTE: subscribeToBooks() removed from global scope and moved into onAuthStateChanged
     </script>
