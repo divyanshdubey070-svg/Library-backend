@@ -293,7 +293,7 @@
                     </div>
                     <div>
                         <h3 class="ai-chatbot-title">AutoLib AI Assistant</h3>
-                        <p class="ai-chatbot-subtitle">Online • Gemini 1.5 Flash</p>
+                        <p class="ai-chatbot-subtitle">Online • Gemini 3.5 Flash</p>
                     </div>
                 </div>
                 <button id="ai-chatbot-close-btn" title="Close chat"><i class="fas fa-times"></i></button>

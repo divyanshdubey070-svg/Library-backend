@@ -191,6 +191,53 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("updateBook", async (data, callback) => {
+    try {
+      const { isbn, title, author, department, description, quantity, eBookLink } = data;
+      const book = await Book.findOne({ where: { isbn } });
+      if (!book) {
+        return callback({ error: "Book not found" });
+      }
+      
+      const diff = quantity - book.quantity;
+      const newAvailable = Math.max(0, book.available + diff);
+      
+      await book.update({
+        title,
+        author,
+        department,
+        description,
+        quantity,
+        available: newAvailable,
+        eBookLink
+      });
+
+      const books = await Book.findAll();
+      io.emit("booksUpdated", books);
+      callback({ success: true });
+    } catch (err) {
+      console.error("updateBook Error:", err);
+      callback({ error: "Failed to update book" });
+    }
+  });
+
+  socket.on("deleteBook", async (data, callback) => {
+    try {
+      const { isbn } = data;
+      const book = await Book.findOne({ where: { isbn } });
+      if (!book) {
+        return callback({ error: "Book not found" });
+      }
+      await book.destroy();
+      const books = await Book.findAll();
+      io.emit("booksUpdated", books);
+      callback({ success: true });
+    } catch (err) {
+      console.error("deleteBook Error:", err);
+      callback({ error: "Failed to delete book" });
+    }
+  });
+
   // --- BARCODE SCANNER ENDPOINTS (FIXED) ---
   socket.on("scanBook", async (data, callback) => {
     try {
@@ -615,13 +662,61 @@ io.on("connection", (socket) => {
       const logsSummary = todayLogs.map(l => `- Student: ${l.name || 'Unknown'}, Enroll: ${l.enrollment || 'N/A'}, IN: ${l.timeIn || '--:--'}, OUT: ${l.timeOut || 'Still Inside'}`).join("\n");
 
       // Construct system instruction prompt
-      const systemPrompt = `You are "AutoLib AI Assistant", a smart, helpful library bot.
-You help library administrators analyze statistics, check books availability, monitor active loans, and query logs.
+      const systemPrompt = `You are "AutoLib AI Assistant", a smart, helpful library bot for the AutoLib Ecosystem.
+You help library administrators and students analyze statistics, check book availability, monitor active loans, query logs, and understand the platform features.
 Speak politely and professionally. If the user chats in Hindi/Hinglish, reply in Hindi/Hinglish. If in English, reply in English.
 Today is: ${new Date().toDateString()} (Format: Day Month Date Year).
 
-Here is the live state of the library database:
----
+=== PLATFORM FEATURES ===
+
+[ADMIN WEBSITE (Web Dashboard)]
+The AutoLib Admin Website is a full-featured library management portal accessible from a browser. It includes:
+- **Login & Authentication**: Secure JWT-based login for admins and students. Only whitelisted students (pre-approved by the college) can register.
+- **Admin Dashboard** (admin-dashboard.html): Shows total books count, borrowed count, and provides tabs for:
+  - Today's Gate logs (students who entered/exited the library today)
+  - Gate History (past check-in/out records)
+  - Active Borrows (currently issued books with due dates)
+  - Return History (past returns)
+  - Waitlists
+  - Inventory Management
+  - Approved Students list
+  - Manual Issue/Return of books
+  - QR Code scanner for student gate check-in/check-out
+- **Books Catalog** (book.html): Browse, search, and filter all library books by department. Admins can:
+  - Add new books (with ISBN, title, author, department, quantity, description, and optional E-Book/PDF URL)
+  - Edit existing books (update title, author, quantity, department, description, and E-Book URL via the Edit Stock button)
+  - Delete books
+  - Scan barcodes to add books
+  - View book details including availability, current borrowers, and digital copy links
+- **Student Dashboard** (dashboard.html): Students can view their own borrow history, active loans, and profile.
+- **Profile Page** (profile.html): Users can view and update their profile info (name, phone, enrollment, semester, department).
+- **Email Verification** (verification.html): OTP-based email verification for new accounts.
+- **AI Chatbot**: This assistant (you!) is available on every page to help with library queries.
+
+[MOBILE APP (AutoLib App - React Native/Expo)]
+The AutoLib Mobile App is built with React Native and Expo. It includes:
+- **Login Screen**: Students log in with email and password.
+- **Register Screen**: New students can register with full name, email, password, phone, enrollment number, semester, and department. Only whitelisted students can register.
+- **Home Screen**: Shows a welcome dashboard with quick stats and recent activity.
+- **Books Screen**: Browse the full library catalog with search and department filters. Each book shows:
+  - Title, author, department, ISBN
+  - Availability status (available count or "Not Available")
+  - E-Book/PDF badge — tapping "📱 Read PDF" opens the Google Drive or PDF link in the phone browser
+- **QR Screen**: Displays the student's personal QR code (Library ID card). Students show this at the library entrance for the librarian to scan for entry/exit logging.
+- **History Screen**: View personal borrow history and past transactions.
+- **Profile Screen**: View and edit personal profile information.
+
+[KEY FEATURES SUMMARY]
+- Students can borrow and return books (managed by admin via Manual Issue/Return or barcode scanning)
+- Gate check-in/check-out via QR code scanning
+- Real-time updates via WebSocket (Socket.IO) — all connected clients see changes instantly
+- E-Book/PDF support: If a physical book is not available, students can read the digital PDF copy
+- Books can have 0 physical quantity (digital-only books with PDF links)
+- Barcode scanner for quick ISBN entry when adding books
+- Department-based filtering on both website and app
+
+=== LIVE DATABASE STATE ===
+
 [INVENTORY]
 ${booksSummary || "No books in catalog."}
 
@@ -639,7 +734,9 @@ Use this context to answer user questions. For example:
 - If asked about "overdue books", look at the [ACTIVE BORROWS] section and check if any borrow due date is before today (${new Date().toDateString()}).
 - If asked about book availability, look at the [INVENTORY] section and check if 'Available' is greater than 0.
 - If asked about check-in/out logs, look at [TODAY'S VISIT LOGS] or explain recent activity.
-Keep your answers clear, concise, and highlight critical items. If the question is not about the library or stats, answer politely but try to guide them back to library assistance. Do not make up fake books or borrows that are not listed in the context.`;
+- If asked "what can this app/website do?" or "what features are available?", refer to the [PLATFORM FEATURES] sections above.
+- If asked about "study" or features unrelated to library data, explain the platform's features from the sections above.
+Keep your answers clear, concise, and highlight critical items. If the question is not about the library, its stats, or platform features, answer politely but try to guide them back to library assistance. Do not make up fake books or borrows that are not listed in the context.`;
 
       // Build payload for Gemini API
       const contents = [];
@@ -660,8 +757,8 @@ Keep your answers clear, concise, and highlight critical items. If the question 
         parts: [{ text: message }]
       });
 
-      // API Endpoint for Google AI Studio Gemini API (using gemini-1.5-flash)
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+      // API Endpoint for Google AI Studio Gemini API (using gemini-3.5-flash)
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`;
 
       const apiResponse = await fetch(geminiUrl, {
         method: "POST",
