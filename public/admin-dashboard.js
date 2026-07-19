@@ -509,16 +509,22 @@ function handleScan(decodedText) {
 
     let userData;
     try {
-        userData = JSON.parse(decodeURIComponent(atob(decodedText)));
-    } catch (err) {
-        showMessage("Invalid QR Code Format.", "error");
-        return;
+        // Try plain JSON first (mobile app sends plain JSON)
+        userData = JSON.parse(decodedText);
+    } catch (e1) {
+        try {
+            // Fallback: try base64-encoded format
+            userData = JSON.parse(decodeURIComponent(atob(decodedText)));
+        } catch (e2) {
+            showMessage("Invalid QR Code Format.", "error");
+            return;
+        }
     }
 
     const enrollment = userData.enrollment || "N/A";
-    const name = userData.fullName || "Unknown User";
-    const branch = userData.department || "-";
-    const sem = userData.semester || "-";
+    const name = userData.fullName || userData.name || "Unknown User";
+    const branch = userData.department || userData.branch || "-";
+    const sem = userData.semester || userData.sem || "-";
 
     // Send scan log to SQLite backend via Socket
     socket.emit("adminScanGateQR", { enrollment, name, branch, sem, isVerifiedChecked: false }, (res) => {
