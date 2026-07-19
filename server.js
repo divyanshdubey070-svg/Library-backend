@@ -608,7 +608,8 @@ io.on("connection", (socket) => {
           sem: sem || "-",
           status: 1,
           timeIn: timeStr,
-          timeOut: null
+          timeOut: null,
+          action: "in"
         });
         io.emit("adminDataUpdated");
         callback({ success: true, action: "in", name: name || enrollment });
@@ -625,7 +626,8 @@ io.on("connection", (socket) => {
 
         await activeLog.update({
           status: 0,
-          timeOut: timeStr
+          timeOut: timeStr,
+          action: "out"
         });
         io.emit("adminDataUpdated");
         callback({ success: true, action: "out", name: name || enrollment });
