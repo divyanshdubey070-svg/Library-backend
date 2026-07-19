@@ -463,7 +463,7 @@ io.on("connection", (socket) => {
         where: { userId: uid, status: 1 }
       });
       if (!activeLog) return callback({ error: "User is not inside library" });
-      const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const timeStr = new Date().toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
       await activeLog.update({ status: 0, timeOut: timeStr });
       io.emit("adminDataUpdated");
       callback({ success: true });
@@ -598,7 +598,7 @@ io.on("connection", (socket) => {
       });
 
       const now = new Date();
-      const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const timeStr = now.toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
 
       if (!activeLog) {
         // CHECK IN
