@@ -187,7 +187,7 @@ io.on("connection", (socket) => {
     try {
       const { uid } = data;
       const books = await BorrowedBook.findAll({ 
-        where: { userId: uid, returned: { [Op.or]: [false, 0] } } 
+        where: { userId: uid, returned: false } 
       });
       callback({ success: true, books });
     } catch (err) {
@@ -320,7 +320,7 @@ io.on("connection", (socket) => {
         where: { 
           bookId: isbn, 
           userId: uid, 
-          returned: { [Op.or]: [false, 0] } 
+          returned: false 
         }
       });
 
@@ -328,7 +328,7 @@ io.on("connection", (socket) => {
       const anyActiveBorrow = await BorrowedBook.findOne({
         where: {
           bookId: isbn,
-          returned: { [Op.or]: [false, 0] }
+          returned: false
         }
       });
 
@@ -355,7 +355,7 @@ io.on("connection", (socket) => {
       if (actionType === "issue") {
         // Prevent double borrowing
         const alreadyBorrowed = await BorrowedBook.findOne({
-          where: { bookId: isbn, userId: uid, returned: { [Op.or]: [false, 0] } }
+          where: { bookId: isbn, userId: uid, returned: false }
         });
         if (alreadyBorrowed) return callback({ error: "You already have this book" });
 
@@ -400,7 +400,7 @@ io.on("connection", (socket) => {
           borrowRecord = await BorrowedBook.findOne({
             where: { 
               bookId: isbn, 
-              returned: { [Op.or]: [false, 0] } 
+              returned: false 
             },
             order: [['issuedAt', 'ASC']]
           });
@@ -410,7 +410,7 @@ io.on("connection", (socket) => {
             where: { 
               bookId: isbn, 
               userId: uid, 
-              returned: { [Op.or]: [false, 0] } 
+              returned: false 
             }
           });
         }
@@ -715,7 +715,7 @@ io.on("connection", (socket) => {
 
       // Fetch library context from SQLite database
       const books = await Book.findAll();
-      const activeBorrows = await BorrowedBook.findAll({ where: { returned: { [Op.or]: [false, 0] } } });
+      const activeBorrows = await BorrowedBook.findAll({ where: { returned: false } });
       const users = await User.findAll({ where: { role: "user" } });
       
       const today = new Date();
