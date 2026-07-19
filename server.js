@@ -575,8 +575,13 @@ io.on("connection", (socket) => {
   socket.on("adminScanGateQR", async (data, callback) => {
     try {
       const { enrollment, name, branch, sem, isVerifiedChecked } = data;
+      
+      if (!enrollment || enrollment === "N/A") {
+        return callback({ error: "Invalid QR: Enrollment number is missing." });
+      }
+
       const user = await User.findOne({ where: { enrollment } });
-      let correctUserId = user ? user.uid : "Unknown";
+      let correctUserId = user ? user.uid : enrollment;
 
       if (user && user.isVerified === false) {
         if (!isVerifiedChecked) {
@@ -598,18 +603,18 @@ io.on("connection", (socket) => {
         await ActivityLog.create({
           userId: correctUserId,
           enrollment: enrollment,
-          name: name,
-          branch: branch,
-          sem: sem,
+          name: name || "Unknown",
+          branch: branch || "-",
+          sem: sem || "-",
           status: 1,
           timeIn: timeStr,
           timeOut: null
         });
         io.emit("adminDataUpdated");
-        callback({ success: true, action: "in", name });
+        callback({ success: true, action: "in", name: name || enrollment });
       } else {
         // CHECK OUT
-        const checkInTime = activeLog.timestamp ? new Date(activeLog.timestamp) : now;
+        const checkInTime = activeLog.createdAt ? new Date(activeLog.createdAt) : now;
         const timeDiffMs = now - checkInTime;
         const COOLDOWN_MS = 1 * 60 * 1000; // 1 minute cooldown
 
@@ -623,11 +628,11 @@ io.on("connection", (socket) => {
           timeOut: timeStr
         });
         io.emit("adminDataUpdated");
-        callback({ success: true, action: "out", name });
+        callback({ success: true, action: "out", name: name || enrollment });
       }
     } catch (error) {
       console.error("adminScanGateQR Error:", error);
-      callback({ error: "Database error during scan" });
+      callback({ error: "Database error: " + (error.message || "Unknown error during scan") });
     }
   });
 
